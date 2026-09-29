@@ -29,13 +29,31 @@ def init_wandb(
 
     wandb.login(key=api_key)
 
-    return wandb.init(
+    run = wandb.init(
         project=project,
         entity=entity,
         name=run_name,
         config=config,
     )
 
+    # Use epoch as the x-axis for epoch-level metrics.
+    run.define_metric("epoch")
+
+    for metric in (
+        "train_loss",
+        "eval_loss",
+        "challenge_avg",
+        "mA",
+        "label_f1",
+        "inst_acc",
+        "inst_prec",
+        "inst_rec",
+        "inst_f1",
+        "learning_rate",
+    ):
+        run.define_metric(metric, step_metric="epoch")
+
+    return run
 
 def log_wandb(
     run: Any | None,
