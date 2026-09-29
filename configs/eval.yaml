@@ -1,0 +1,18 @@
+# Data
+data_path: "data/annotations/val.csv"
+data_name: None
+
+num_samples: 20
+
+# Augmentation
+aug: True
+median: True
+horizontal_flip: True
+random_resized_crop: False
+affine: True
+safe_rotate: False
+coarse_dropout: True
+gaussian_blur: False
+color_jitter: False
+rgb_shift: False
+image_compression: False

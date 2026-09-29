@@ -1,0 +1,11 @@
+torch
+torchvision
+pandas
+numpy
+Pillow
+PyYAML
+python-dotenv
+albumentations
+jaxtyping
+transformers
+wandb
