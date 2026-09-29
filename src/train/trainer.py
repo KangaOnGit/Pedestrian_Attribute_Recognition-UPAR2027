@@ -201,7 +201,7 @@ class Trainer:
                     "Batch [%d/%d] | "
                     "Loss %.5f | "
                     "LR %.8f",
-                    epoch + 1,
+                    epoch,
                     self.epochs,
                     batch_idx + 1,
                     len(self.train_loader),
