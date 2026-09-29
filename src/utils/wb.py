@@ -58,7 +58,6 @@ def init_wandb(
 def log_wandb(
     run: Any | None,
     metrics: dict[str, Any],
-    step: int,
 ) -> None:
     if run is not None:
-        run.log(metrics, step=step)
+        run.log(metrics)

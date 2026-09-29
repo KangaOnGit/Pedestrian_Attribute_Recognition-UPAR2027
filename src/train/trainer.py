@@ -148,7 +148,7 @@ class Trainer:
                 "learning_rate": learning_rate,
             }
             self._log_epoch(row, csv_path)
-            log_wandb(self.wandb_run, row, epoch)
+            log_wandb(self.wandb_run, row)
             self.scheduler.step()
 
             if eval_result.mA > self.best_mA:
