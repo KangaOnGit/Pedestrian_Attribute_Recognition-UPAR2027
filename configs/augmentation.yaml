@@ -20,11 +20,8 @@ train:
       mean_width: 73
       mean_height: 160
 
-    median_width: 86
-    median_height: 200
-
-    mean_width: 75
-    mean_height: 176
+    median_width: 256
+    median_height: 256
 
   horizontal_flip:
     p: 0.5
@@ -98,11 +95,8 @@ eval:
       mean_width: 73
       mean_height: 160
 
-    median_width: 86
-    median_height: 200
-
-    mean_width: 75
-    mean_height: 176
+    median_width: 256
+    median_height: 256
 
   horizontal_flip:
     p: 0.5

@@ -8,19 +8,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
-
+    
 import torch
-import torch.nn as nn
-
-from torchvision.models import (
-    ResNet18_Weights,
-    ResNet50_Weights,
-    resnet18,
-    resnet50,
-)
 
 from src.builders.data_loaders import build_dataloaders
-from src.models import SigLIP2AttributeModel
+from src.models.siglip2 import SigLIP2Baseline
 from src.train.trainer import Trainer
 from src.utils.config import load_config
 from src.utils.seed import set_seed
@@ -38,13 +30,6 @@ DEFAULT_DATASET = TRAIN_CONFIG["data"].get("data_name")
 
 if DEFAULT_DATASET == "None":
     DEFAULT_DATASET = None
-
-
-MODEL_BUILDERS = {
-    "resnet18": (resnet18, ResNet18_Weights),
-    "resnet50": (resnet50, ResNet50_Weights),
-}
-
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -92,22 +77,21 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Use the complete training CSV.",
     )
-
-    # Model
+    
     parser.add_argument(
         "--backbone",
-        choices=(*MODEL_BUILDERS, "siglip2"),
-        default="resnet50",
-        help="Image backbone architecture.",
+        choices=("siglip2"),
+        default="siglip2",
+        help="Backbone",
     )
-
+    
     parser.add_argument(
         "--pretrained",
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Initialize backbone with ImageNet weights.",
     )
-
+    
     # Training
     parser.add_argument(
         "--batch-size",
@@ -232,36 +216,6 @@ def parse_args() -> argparse.Namespace:
 
     return parser.parse_args()
 
-def build_model(
-    pretrained: bool,
-    backbone: str = "siglip2",
-    num_attributes: int = 40,
-) -> nn.Module:
-    """
-    Build the PAR model.
-
-    Build a torchvision ResNet or SigLIP2 attribute model.
-    """
-
-    if backbone == "siglip2":
-        return SigLIP2AttributeModel(
-            num_attributes=num_attributes,
-            pretrained=pretrained,
-        )
-
-    model_builder, weights_type = MODEL_BUILDERS[backbone]
-
-    weights = weights_type.DEFAULT if pretrained else None
-
-    model = model_builder(weights=weights)
-
-    model.fc = nn.Linear(
-        model.fc.in_features,
-        num_attributes,
-    )
-
-    return model
-
 def validate_args(args):
     """Validate command-line arguments."""
 
@@ -341,11 +295,7 @@ def main():
 
     # Model
     log.info("Loading model...")
-    model = build_model(
-        backbone=args.backbone,
-        num_attributes=num_attributes,
-        pretrained=args.pretrained,
-    )
+    model = SigLIP2Baseline()
 
     # W&B
     wandb_run = None

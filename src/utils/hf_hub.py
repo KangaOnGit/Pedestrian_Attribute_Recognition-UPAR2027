@@ -1,7 +1,9 @@
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from transformers import Trainer
+if TYPE_CHECKING:
+    from transformers import Trainer
 
 from src.utils.config import HF_TOKEN
 
@@ -10,7 +12,7 @@ log = logging.getLogger(__name__)
 
 def push_hub(
     name: str,
-    trainer: Trainer,
+    trainer: "Trainer",
 ) -> None:
     trainer.push_to_hub(name, token=HF_TOKEN)
 
