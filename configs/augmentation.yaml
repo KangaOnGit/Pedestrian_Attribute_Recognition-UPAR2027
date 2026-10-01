@@ -23,6 +23,9 @@ train:
     median_width: 256
     median_height: 256
 
+    mean_width: 256
+    mean_height: 256
+
   horizontal_flip:
     p: 0.5
 
@@ -98,6 +101,9 @@ eval:
     median_width: 256
     median_height: 256
 
+    mean_width: 256
+    mean_height: 256
+    
   horizontal_flip:
     p: 0.5
 
