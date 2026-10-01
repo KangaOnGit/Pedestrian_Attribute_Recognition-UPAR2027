@@ -20,6 +20,7 @@ from torchvision.models import (
 )
 
 from src.builders.data_loaders import build_dataloaders
+from src.models import SigLIP2AttributeModel
 from src.train.trainer import Trainer
 from src.utils.config import load_config
 from src.utils.seed import set_seed
@@ -95,9 +96,9 @@ def parse_args() -> argparse.Namespace:
     # Model
     parser.add_argument(
         "--backbone",
-        choices=tuple(MODEL_BUILDERS),
+        choices=(*MODEL_BUILDERS, "siglip2"),
         default="resnet50",
-        help="Torchvision ResNet architecture.",
+        help="Image backbone architecture.",
     )
 
     parser.add_argument(
@@ -226,16 +227,21 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 def build_model(
-    backbone: str,
-    num_attributes: int,
     pretrained: bool,
+    backbone: str = "siglip2",
+    num_attributes: int = 40,
 ) -> nn.Module:
     """
     Build the PAR model.
 
-    Currently uses a torchvision ResNet classification head as
-    the baseline model.
+    Build a torchvision ResNet or SigLIP2 attribute model.
     """
+
+    if backbone == "siglip2":
+        return SigLIP2AttributeModel(
+            num_attributes=num_attributes,
+            pretrained=pretrained,
+        )
 
     model_builder, weights_type = MODEL_BUILDERS[backbone]
 
