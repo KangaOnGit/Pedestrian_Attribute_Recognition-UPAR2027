@@ -57,7 +57,7 @@ class Trainer:
         optim_name: str,
         loss_name: str,
         
-        logging_steps: int = CONFIG["hyper_param"]["logging_steps"],
+        logging_steps: int,
         wandb_run: object | None = None,
     ) -> None:
         """

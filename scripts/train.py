@@ -114,6 +114,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=HYPER_PARAM["batch_size"],
     )
+    
+    parser.add_argument(
+        "--logging-steps",
+        type=int,
+        default=HYPER_PARAM["logging_steps"],
+    )
 
     parser.add_argument(
         "--epochs",
@@ -382,7 +388,7 @@ def main():
         output_dir=str(output_dir),
         optim_name=args.optimizer,
         loss_name=args.loss,
-        logging_steps=HYPER_PARAM["logging_steps"],
+        logging_steps=args.logging_steps,
         wandb_run=wandb_run,
     )
 
