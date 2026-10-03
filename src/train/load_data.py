@@ -20,8 +20,10 @@ class UPAR_dataset(Dataset):
         data_name: str | None = None,
         num_samples: int | None = None,
         aug: bool = True,
-
-        median: bool = True,
+        
+        height: int = 256,
+        width: int = 256,
+        
         horizontal_flip: bool = True,
         random_resized_crop: bool = False,
         affine: bool = True,
@@ -121,8 +123,6 @@ class UPAR_dataset(Dataset):
         self.split: str = split
         self.data_name: str | None = data_name
         self.aug: bool = aug
-
-        self.median: bool = median
         self.horizontal_flip: bool = horizontal_flip
         self.random_resized_crop: bool = random_resized_crop
         self.affine: bool = affine
@@ -132,10 +132,14 @@ class UPAR_dataset(Dataset):
         self.color_jitter: bool = color_jitter
         self.rgb_shift: bool = rgb_shift
         self.image_compression: bool = image_compression
+        
+        self.width: int = width
+        self.height: int = height
 
         self.transform = build_transforms(
             dataset=self.data_name,
-            median=self.median,
+            height = self.height,
+            width = self.width,
             horizontal_flip=self.aug and self.horizontal_flip,
             random_resized_crop=self.aug and self.random_resized_crop,
             affine=self.aug and self.affine,

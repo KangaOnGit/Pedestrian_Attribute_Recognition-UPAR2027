@@ -1,7 +1,6 @@
-def build_augmentation_flags(augmentation_config):
+def build_augmentation_flags(augmentation_config,):
     """Convert the YAML augmentation config into dataset constructor flags."""
     return {
-        "median": "median" in augmentation_config,
         "horizontal_flip": "horizontal_flip" in augmentation_config,
         "random_resized_crop": "random_resized_crop" in augmentation_config,
         "affine": "affine" in augmentation_config,

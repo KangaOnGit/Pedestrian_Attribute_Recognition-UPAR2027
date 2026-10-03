@@ -9,7 +9,10 @@ AUGMENTATION_CONFIG = load_config("configs/augmentation.yaml")
 TRAIN_AUGMENTATION = AUGMENTATION_CONFIG["train"]
 EVAL_AUGMENTATION = AUGMENTATION_CONFIG["eval"]
 
-def build_dataloaders(args, device):
+def build_dataloaders(args,
+                      device,
+                      height: int,
+                      width: int):
     """Build training and validation datasets/loaders."""
 
     train_aug_flags = build_augmentation_flags(TRAIN_AUGMENTATION)
@@ -26,6 +29,8 @@ def build_dataloaders(args, device):
         ),
         aug=args.augment,
         **train_aug_flags,
+        height = height,
+        width = width,
     )
 
     eval_dataset = UPAR_dataset(
@@ -35,6 +40,8 @@ def build_dataloaders(args, device):
         num_samples=args.eval_num_samples,
         aug=False,
         **eval_aug_flags,
+        height = height,
+        width = width,
     )
 
     pin_memory = device.type == "cuda"

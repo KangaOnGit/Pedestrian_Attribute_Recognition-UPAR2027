@@ -13,7 +13,7 @@ hyper_param:
 
   batch_size: 128
 
-  loss: "bce"
+  loss: "focal"
   optim: "adamw"
   workers: 0
   output_dir: "outputs/train"
@@ -31,6 +31,10 @@ hyper_param:
   color_jitter: False
   rgb_shift: False
   image_compression: False
+
+  # Resize
+  height: 256
+  width: 256
 
 data:
   data_path: "data/annotations/train.csv"

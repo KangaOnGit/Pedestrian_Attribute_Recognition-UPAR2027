@@ -11,7 +11,8 @@ CONFIG = load_config("configs/augmentation.yaml")
 
 def build_transforms(
     dataset: str | None = None,
-    median: bool = True,
+    height: int = 256,
+    width: int = 256,
     horizontal_flip: bool = True,
     random_resized_crop: bool = False,
     affine: bool = True,
@@ -66,24 +67,6 @@ def build_transforms(
         
     transforms: list[A.BasicTransform] = []
 
-    resize_cfg = config["resize"]
-
-    if dataset is not None and dataset not in resize_cfg:
-        raise ValueError(
-            f"Unknown dataset '{dataset}'. "
-            f"Expected one of: market, pa, peta."
-        )
-    elif dataset is None:
-        resize_cfg = resize_cfg
-    else:
-        resize_cfg = resize_cfg[dataset]
-        
-    if median:
-        width = resize_cfg["median_width"]
-        height = resize_cfg["median_height"]
-    else:
-        width = resize_cfg["mean_width"]
-        height = resize_cfg["mean_height"]
     log.info(f"Currently augmenting for Dataset {dataset}. "
              f"Image will be resized to (H, W) = ({height}, {width})")
     

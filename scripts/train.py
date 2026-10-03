@@ -12,7 +12,6 @@ if str(PROJECT_ROOT) not in sys.path:
 import torch
 
 from src.builders.data_loaders import build_dataloaders
-from src.models.siglip2 import SigLIP2Baseline
 from src.train.trainer import Trainer
 from src.utils.config import load_config
 from src.utils.seed import set_seed
@@ -121,6 +120,18 @@ def parse_args() -> argparse.Namespace:
         "--weight-decay",
         type=float,
         default=float(HYPER_PARAM["weight_decay"]),
+    )
+    
+    parser.add_argument(
+        "--width",
+        type=int,
+        default=HYPER_PARAM["width"],
+    )
+    
+    parser.add_argument(
+        "--height",
+        type=int,
+        default=HYPER_PARAM["height"],
     )
 
     parser.add_argument(
@@ -274,7 +285,10 @@ def main():
         eval_dataset,
         train_loader,
         eval_loader,
-    ) = build_dataloaders(args, device)
+    ) = build_dataloaders(args,
+                          device,
+                          height = args.height,
+                          width = args.width)
 
     num_attributes = len(train_dataset.label_columns)
 
@@ -295,7 +309,7 @@ def main():
 
     # Model
     log.info("Loading model...")
-    model = SigLIP2Baseline()
+    model = None
 
     # W&B
     wandb_run = None
