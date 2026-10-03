@@ -31,6 +31,8 @@ DEFAULT_DATASET = TRAIN_CONFIG["data"].get("data_name")
 
 if DEFAULT_DATASET == "None":
     DEFAULT_DATASET = None
+    
+PROMPTS = load_config("configs/prompts.yaml")["prompts"]
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -313,9 +315,10 @@ def main():
     log.info("Loading model...")
     model = SparseROIAttributeModel(
         num_classes = 40,
-        hidden_dim = 256,
+        hidden_dim = 128,
         num_experts = 5,
-        attention_k = 5
+        attention_k = 2,
+        prompts = PROMPTS,
     )
 
     # W&B

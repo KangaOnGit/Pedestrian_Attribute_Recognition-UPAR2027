@@ -216,17 +216,41 @@ model = SparseROIAttributeModel(
     hidden_dim=256,
     num_experts=4,
     attention_k=2,
+    roi_generator="sam3",
     prompts=("person", "backpack"),
 )
-logits = model(images, roi_boxes=boxes)
+logits = model(images)
 ```
 
-Boxes use pixel-coordinate `(x1, y1, x2, y2)` format with shape `[B, R, 4]`;
-zero-area boxes can be used for padding. To connect a detector such as DINO or
-SAM 3, pass a `proposal_generator(images, prompts)` callable that returns this
-box tensor. Detector loading and prompt-specific post-processing remain the
-caller's responsibility. The default image/ROI encoders are compact convolutional
-encoders; custom encoders may be passed in if they return `[batch, hidden_dim]`.
+Setting `roi_generator="sam3"` loads the Hugging Face `facebook/sam3` model and
+processor during model construction; SAM 3 runs each configured text prompt and
+returns pixel-coordinate `(x1, y1, x2, y2)` boxes. SAM 3 weights may require
+accepting the upstream model terms and authenticating with Hugging Face. Set
+`roi_generator="none"` to disable automatic proposals, or pass `roi_boxes`
+directly to `forward`; direct boxes take precedence over generated boxes.
+SAM 3 currently runs once per image and prompt, so larger batches or prompt lists
+increase proposal-generation time.
+
+DINOv3 is available as an optional full-image feature encoder, not as a
+text-prompted box detector:
+
+```python
+model = SparseROIAttributeModel(
+    num_classes=40,
+    hidden_dim=256,
+    num_experts=4,
+    attention_k=2,
+    roi_generator="sam3",
+    prompts=("person", "backpack"),
+    image_backbone_type="dinov3",
+)
+```
+
+The default full-image and ROI encoders are compact convolutional encoders.
+Images are expected to use the ImageNet mean/std normalization configured by the
+training pipeline; the detector and DINOv3 preprocessing convert them back to
+RGB before their Hugging Face processors run. Custom image and ROI encoders may
+be passed in if they return `[batch, hidden_dim]`.
 
 ## Notes
 

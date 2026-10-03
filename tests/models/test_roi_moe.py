@@ -1,8 +1,61 @@
+from __future__ import annotations
+
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import torch
+from torch import nn
 
 from src.models import SparseROIAttributeModel
+
+
+class FakeBatch(dict):
+    def to(self, device: torch.device) -> FakeBatch:
+        return FakeBatch(
+            {
+                key: value.to(device) if isinstance(value, torch.Tensor) else value
+                for key, value in self.items()
+            }
+        )
+
+
+class FakeSam3(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(()))
+
+    def forward(self, **_inputs: object) -> object:
+        return tuple(_inputs)
+
+
+class FakeSam3Processor:
+    def __init__(self) -> None:
+        self.seen_prompts: list[str] = []
+
+    def __call__(
+        self,
+        images: object,
+        text: str,
+        return_tensors: str,
+    ) -> FakeBatch:
+        assert return_tensors == "pt"
+        assert images is not None
+        self.seen_prompts.append(text)
+        return FakeBatch({"original_sizes": torch.tensor([[48, 24]])})
+
+    def post_process_instance_segmentation(
+        self,
+        outputs: object,
+        threshold: float,
+        mask_threshold: float,
+        target_sizes: list[list[int]],
+    ) -> list[dict[str, torch.Tensor]]:
+        assert outputs is not None
+        assert threshold == 0.5
+        assert mask_threshold == 0.5
+        assert target_sizes == [[48, 24]]
+        return [{"boxes": torch.tensor([[1.0, 2.0, 20.0, 40.0]])}]
 
 
 class SparseROIAttributeModelTests(unittest.TestCase):
@@ -39,37 +92,61 @@ class SparseROIAttributeModelTests(unittest.TestCase):
             0,
         )
 
-    def test_detector_callback_and_sparse_roi_dispatch(self) -> None:
-        received_prompts: list[tuple[str, ...]] = []
-
-        def propose(images: torch.Tensor, prompts: tuple[str, ...]) -> torch.Tensor:
-            received_prompts.append(prompts)
-            return images.new_tensor([[[1, 1, 20, 40]]]).expand(images.shape[0], -1, -1)
-
-        model = self.build_model(prompts=("person", "backpack"), proposal_generator=propose)
-        router_output = model.roi_router[-1]
-        with torch.no_grad():
-            router_output.weight.zero_()
-            router_output.bias.copy_(torch.tensor([0.0, 10.0, 0.0]))
-        calls = [0, 0, 0]
-        handles = [
-            expert.register_forward_hook(
-                lambda *_, expert_index=index: calls.__setitem__(
-                    expert_index,
-                    calls[expert_index] + 1,
-                )
+    def test_sam3_is_initialized_and_generates_prompt_boxes(self) -> None:
+        processor = FakeSam3Processor()
+        with (
+            patch("transformers.Sam3Model.from_pretrained", return_value=FakeSam3()) as load_model,
+            patch("transformers.Sam3Processor.from_pretrained", return_value=processor) as load_processor,
+        ):
+            model = self.build_model(
+                prompts=("person", "backpack"),
+                roi_generator="sam3",
+                sam3_model_id="test/sam3",
             )
-            for index, expert in enumerate(model.roi_experts)
-        ]
-        try:
             logits = model(torch.randn(2, 3, 48, 24))
-        finally:
-            for handle in handles:
-                handle.remove()
 
         self.assertEqual(tuple(logits.shape), (2, 7))
-        self.assertEqual(received_prompts, [("person", "backpack")])
-        self.assertEqual(calls, [0, 1, 0])
+        load_model.assert_called_once_with("test/sam3")
+        load_processor.assert_called_once_with("test/sam3")
+        self.assertEqual(processor.seen_prompts, ["person", "backpack"] * 2)
+
+    def test_dinov3_can_be_used_as_full_image_backbone(self) -> None:
+        class FakeDINOv3(nn.Module):
+            config = SimpleNamespace(hidden_size=12)
+
+            def __init__(self) -> None:
+                super().__init__()
+                self.weight = nn.Parameter(torch.ones(()))
+
+            def forward(self, **inputs: torch.Tensor) -> object:
+                batch_size = inputs["pixel_values"].shape[0]
+                return SimpleNamespace(
+                    pooler_output=torch.ones(batch_size, 12) * self.weight
+                )
+
+        class FakeImageProcessor:
+            def __call__(
+                self,
+                images: list[object],
+                return_tensors: str,
+            ) -> FakeBatch:
+                assert return_tensors == "pt"
+                return FakeBatch({"pixel_values": torch.ones(len(images), 3, 32, 32)})
+
+        with (
+            patch(
+                "transformers.AutoImageProcessor.from_pretrained",
+                return_value=FakeImageProcessor(),
+            ),
+            patch(
+                "transformers.AutoModel.from_pretrained",
+                return_value=FakeDINOv3(),
+            ),
+        ):
+            model = self.build_model(image_backbone_type="dinov3")
+            logits = model(torch.randn(2, 3, 48, 24))
+
+        self.assertEqual(tuple(logits.shape), (2, 7))
 
     def test_no_valid_rois_uses_full_image_branch(self) -> None:
         model = self.build_model()

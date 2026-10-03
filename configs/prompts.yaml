@@ -1,0 +1,11 @@
+prompts: [
+    "the entire visible pedestrian",
+    "the pedestrian's head and face",
+    "the pedestrian's hair",
+    "the pedestrian's upper body clothing",
+    "the pedestrian's lower body clothing",
+    "the pedestrian's backpack",
+    "the pedestrian's bag",
+    "the pedestrian's eyeglasses or sunglasses",
+    "the pedestrian's hat or headwear",
+]

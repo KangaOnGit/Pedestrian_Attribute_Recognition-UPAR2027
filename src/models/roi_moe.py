@@ -1,34 +1,16 @@
 """Sparse mixture-of-experts model for full-image and prompted-ROI features."""
 
-from collections.abc import Callable, Sequence
+from __future__ import annotations
+
+from collections.abc import Sequence
+from typing import Literal
 
 import torch
+from PIL import Image
 from torch import Tensor, nn
 from torch.nn import functional as F
-
-
-class ConvFeatureEncoder(nn.Module):
-    """Small convolutional encoder that returns one vector per input image."""
-
-    def __init__(self, in_channels: int, hidden_dim: int) -> None:
-        super().__init__()
-        self.features = nn.Sequential(
-            nn.Conv2d(in_channels, 32, kernel_size=3, stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(32),
-            nn.GELU(),
-            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(64),
-            nn.GELU(),
-            nn.Conv2d(64, hidden_dim, kernel_size=3, stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(hidden_dim),
-            nn.GELU(),
-            nn.AdaptiveAvgPool2d(1),
-            nn.Flatten(),
-        )
-
-    def forward(self, images: Tensor) -> Tensor:
-        return self.features(images)
-
+from src.models.roi_generator import Sam3PromptBoxGenerator
+from src.models.feature_encoder import DINOv3FeatureEncoder, ConvFeatureEncoder
 
 class ROIExpert(nn.Module):
     """Processes the ROIs routed to one expert."""
@@ -44,33 +26,42 @@ class ROIExpert(nn.Module):
 
     def forward(self, rois: Tensor) -> Tensor:
         return self.projection(self.encoder(rois))
-
-
 class SparseROIAttributeModel(nn.Module):
     """Combine sparse prompted-ROI experts and a full-image path.
 
-    ``proposal_generator``, when provided, is called with ``(images, prompts)``
-    and must return pixel-coordinate XYXY boxes shaped ``[B, R, 4]``. A detector
-    adapter can be supplied here, or boxes can be passed to ``forward``.
+    ``roi_generator="sam3"`` loads SAM 3 during construction and uses
+    ``prompts`` to generate pixel-coordinate XYXY boxes. Boxes may also be
+    passed directly to ``forward``.
     Custom encoders must accept image batches and return ``[N, hidden_dim]``.
     """
 
     def __init__(
         self,
+        
         num_classes: int,
         hidden_dim: int,
         num_experts: int,
         attention_k: int,
+        
         *,
         in_channels: int = 3,
         roi_top_k: int = 1,
+        
         segmentation_top_k: int = 1,
         num_attention_heads: int = 4,
+        
         roi_size: tuple[int, int] = (96, 48),
         prompts: Sequence[str] = (),
-        proposal_generator: Callable[[Tensor, Sequence[str]], Tensor] | None = None,
+        roi_generator: Literal["none", "sam3"] = "sam3",
+        sam3_model_id: str = "facebook/sam3",
+        sam3_score_threshold: float = 0.5,
+        
+        image_backbone_type: Literal["conv", "dinov3"] = "conv",
+        dinov3_model_id: str = "facebook/dinov3-vits16-pretrain-lvd1689m",
+        dinov3_trainable: bool = False,
         image_backbone: nn.Module | None = None,
         roi_backbones: Sequence[nn.Module] | None = None,
+        
     ) -> None:
         super().__init__()
         if min(num_classes, hidden_dim, num_experts, attention_k) < 1:
@@ -86,6 +77,18 @@ class SparseROIAttributeModel(nn.Module):
             raise ValueError("hidden_dim must be divisible by num_attention_heads")
         if in_channels < 1 or len(roi_size) != 2 or min(roi_size) < 1:
             raise ValueError("in_channels and both roi_size dimensions must be positive")
+        if roi_generator not in ("none", "sam3"):
+            raise ValueError("roi_generator must be 'none' or 'sam3'")
+        if roi_generator == "sam3" and not prompts:
+            raise ValueError("prompts must be provided when roi_generator='sam3'")
+        if image_backbone_type not in ("conv", "dinov3"):
+            raise ValueError("image_backbone_type must be 'conv' or 'dinov3'")
+        if in_channels != 3 and (
+            roi_generator == "sam3" or image_backbone_type == "dinov3"
+        ):
+            raise ValueError("SAM 3 and DINOv3 require three-channel RGB inputs")
+        if not 0 <= sam3_score_threshold <= 1:
+            raise ValueError("sam3_score_threshold must be between 0 and 1")
         if roi_backbones is not None and len(roi_backbones) != num_experts:
             raise ValueError("roi_backbones must contain exactly num_experts encoders")
 
@@ -96,13 +99,29 @@ class SparseROIAttributeModel(nn.Module):
         self.segmentation_top_k = segmentation_top_k
         self.roi_size = roi_size
         self.prompts = tuple(prompts)
-        self.proposal_generator = proposal_generator
+        self.roi_generator_name = roi_generator
+        self.roi_proposal_generator = (
+            Sam3PromptBoxGenerator(
+                model_id=sam3_model_id,
+                score_threshold=sam3_score_threshold,
+            )
+            if roi_generator == "sam3"
+            else None
+        )
 
         self.num_classes = num_classes
         self.image_backbone = (
             image_backbone
             if image_backbone is not None
-            else ConvFeatureEncoder(in_channels, hidden_dim)
+            else (
+                DINOv3FeatureEncoder(
+                    hidden_dim=hidden_dim,
+                    model_id=dinov3_model_id,
+                    trainable=dinov3_trainable,
+                )
+                if image_backbone_type == "dinov3"
+                else ConvFeatureEncoder(in_channels, hidden_dim)
+            )
         )
         self.roi_experts = nn.ModuleList(
             [
@@ -174,8 +193,8 @@ class SparseROIAttributeModel(nn.Module):
         if channels != self.in_channels:
             raise ValueError(f"images must have {self.in_channels} channels")
 
-        if roi_boxes is None and self.proposal_generator is not None:
-            roi_boxes = self.proposal_generator(images, self.prompts)
+        if roi_boxes is None and self.roi_proposal_generator is not None:
+            roi_boxes = self.roi_proposal_generator(images, self.prompts)
         if roi_boxes is None:
             roi_boxes = images.new_empty((batch_size, 0, 4))
         roi_boxes = torch.as_tensor(roi_boxes, device=images.device, dtype=images.dtype)
@@ -360,4 +379,9 @@ class SparseROIAttributeModel(nn.Module):
             raise ValueError(f"{name} must return a rank-2 tensor shaped [N, hidden_dim]")
 
 
-__all__ = ["ConvFeatureEncoder", "SparseROIAttributeModel"]
+__all__ = [
+    "ConvFeatureEncoder",
+    "DINOv3FeatureEncoder",
+    "Sam3PromptBoxGenerator",
+    "SparseROIAttributeModel",
+]

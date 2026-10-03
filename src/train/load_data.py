@@ -151,6 +151,22 @@ class UPAR_dataset(Dataset):
             image_compression=self.aug and self.image_compression,
             split=self.split,
         )
+        
+        self.transform_no_aug = build_transforms(
+            dataset=self.data_name,
+            height = self.height,
+            width = self.width,
+            horizontal_flip=False,
+            random_resized_crop=False,
+            affine=False,
+            safe_rotate=False,
+            coarse_dropout=False,
+            gaussian_blur=False,
+            color_jitter=False,
+            rgb_shift=False,
+            image_compression=False,
+            split=self.split,
+        )
 
         log.info(
             f"Using data {self.data_name} with aug {self.aug} "
@@ -165,6 +181,7 @@ class UPAR_dataset(Dataset):
         idx: int,
     ) -> tuple[
         Float[torch.Tensor, "C H W"],
+        Float[torch.Tensor, "C H W"],
         Float[torch.Tensor, "K"],
     ]:
         label: Float[torch.Tensor, "K"] = torch.tensor(
@@ -172,12 +189,16 @@ class UPAR_dataset(Dataset):
             dtype=torch.float32,
         )
 
-        image: np.ndarray = np.array(
+        image_array: np.ndarray = np.array(
             Image.open(self.image_paths[idx]).convert("RGB")
         )
 
-        image: Float[torch.Tensor, "C H W"] = self.transform(
-            image=image
+        image_aug: Float[torch.Tensor, "C H W"] = self.transform(
+            image=image_array
+        )["image"]
+        
+        image_no_aug: Float[torch.Tensor, "C H W"] = self.transform_no_aug(
+            image=image_array
         )["image"]
 
-        return image, label
+        return image_aug, image_no_aug, label
