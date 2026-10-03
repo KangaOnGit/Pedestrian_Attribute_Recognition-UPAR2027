@@ -197,6 +197,37 @@ Validation metrics are computed with a sigmoid threshold of 0.5. The code report
 
 This follows the multi-label classification evaluation flow in `src/metrics/run.py`.
 
+## Sparse ROI mixture-of-experts model
+
+`src.models.SparseROIAttributeModel` provides a separate model implementation for
+prompted pedestrian ROIs and full-image context. It uses sparse top-k routing to
+send each ROI to only its selected ROI expert, attends over the per-expert
+features with `attention_k` learned queries, concatenates that feature with the
+full-image feature, and routes the fused representation through a five-expert
+classification head. The returned tensor contains **logits** shaped
+`[batch_size, num_classes]`; train it with a multi-label logits loss such as
+`BCEWithLogitsLoss`.
+
+```python
+from src.models import SparseROIAttributeModel
+
+model = SparseROIAttributeModel(
+    num_classes=40,
+    hidden_dim=256,
+    num_experts=4,
+    attention_k=2,
+    prompts=("person", "backpack"),
+)
+logits = model(images, roi_boxes=boxes)
+```
+
+Boxes use pixel-coordinate `(x1, y1, x2, y2)` format with shape `[B, R, 4]`;
+zero-area boxes can be used for padding. To connect a detector such as DINO or
+SAM 3, pass a `proposal_generator(images, prompts)` callable that returns this
+box tensor. Detector loading and prompt-specific post-processing remain the
+caller's responsibility. The default image/ROI encoders are compact convolutional
+encoders; custom encoders may be passed in if they return `[batch, hidden_dim]`.
+
 ## Notes
 
 - The code uses `argparse` for command-line configuration; no separate training notebook is required.

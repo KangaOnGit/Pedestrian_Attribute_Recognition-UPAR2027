@@ -2,13 +2,13 @@ default:
   seed: 42
 
 hyper_param:
-  lr: 3.e-4
+  lr: 0.002
   epochs: 5
 
   weight_decay: 1.e-5
 
   logging_steps: 10
-  warmup_steps: 200
+  warmup_steps: 10
   gradient_steps: 8
 
   batch_size: 128

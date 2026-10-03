@@ -18,6 +18,8 @@ from src.utils.seed import set_seed
 from src.utils.wb import init_wandb
 from src.utils.config import resolve_path
 
+from src.models.roi_moe import SparseROIAttributeModel
+
 
 TRAIN_CONFIG = load_config("configs/train.yaml")
 HYPER_PARAM = TRAIN_CONFIG["hyper_param"]
@@ -309,7 +311,12 @@ def main():
 
     # Model
     log.info("Loading model...")
-    model = None
+    model = SparseROIAttributeModel(
+        num_classes = 40,
+        hidden_dim = 256,
+        num_experts = 5,
+        attention_k = 5
+    )
 
     # W&B
     wandb_run = None
