@@ -41,6 +41,7 @@ class SparseROIAttributeModel(nn.Module):
         sam3_score_threshold: float = 0.5,
         yoloe_model_id: str = "yoloe-11s-seg.pt",
         yoloe_score_threshold: float = 0.3,
+        yoloe_prompt_mode: Literal["loop", "one-pass"] = "loop",
         
         image_backbone_type: Literal["conv", "dinov3"] = "conv",
         dinov3_model_id: str = "facebook/dinov3-vits16-pretrain-lvd1689m",
@@ -98,6 +99,7 @@ class SparseROIAttributeModel(nn.Module):
                 YOLOEPromptBoxGenerator(
                     model_id=yoloe_model_id,
                     score_threshold=yoloe_score_threshold,
+                    prompt_mode=yoloe_prompt_mode,
                 )
                 if roi_generator == "yoloe"
                 else None
@@ -213,7 +215,7 @@ class SparseROIAttributeModel(nn.Module):
                     "images_detector is required for automatic ROI generation; "
                     "it must contain resized RGB pixels in the [0, 1] range"
                 )
-            roi_boxes: Float[torch.Tensor, "B P 4"] = self.roi_proposal_generator(
+            roi_boxes: Float[torch.Tensor, "B R 4"] = self.roi_proposal_generator(
                 images_detector,
                 self.prompts,
             )

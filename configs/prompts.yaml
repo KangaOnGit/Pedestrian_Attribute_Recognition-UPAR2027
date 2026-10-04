@@ -1,4 +1,5 @@
 prompts: [
+    "the entire visible pedestrian",
     "the pedestrian's head and face",
     "the pedestrian's hair",
     "the pedestrian's upper body clothing",

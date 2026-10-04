@@ -113,9 +113,12 @@ routing provides a way for the model to learn specialized processing; it is
 not a claim that experts are inherently superior to a standard feed-forward
 classifier.
 
-YOLO-E and SAM 3 are optional proposal generators. Each returns one
-highest-confidence pixel-coordinate `(x1, y1, x2, y2)` box per prompt and image;
-missing detections use zero-area boxes and are ignored by the ROI encoder.
+YOLO-E and SAM 3 are optional proposal generators. In `loop` mode, YOLO-E
+returns the highest-confidence pixel-coordinate `(x1, y1, x2, y2)` box per
+prompt and image. In `one-pass` mode, it returns all detections for all prompts
+in one call. Since each image can produce a different number of boxes, the
+one-pass result is padded to the largest number of detections in that batch;
+zero-area padding boxes are ignored by the ROI encoder.
 Automatic proposal generation can be disabled with `--roi-generator none`, or
 caller-provided `roi_boxes` can be used instead.
 
@@ -132,6 +135,7 @@ model = SparseROIAttributeModel(
     attention_k=2,
     roi_generator="yoloe",
     prompts=("person", "backpack"),
+    yoloe_prompt_mode="one-pass",
 )
 
 # The first two inputs use the configured ImageNet normalization.
@@ -148,6 +152,15 @@ generation is enabled. It is a separate resized RGB tensor in `[0, 1]`, so
 YOLO-E receives the pixel range it expects without changing the normalized
 images used by the model. It is not required when automatic proposals are
 disabled or when `roi_boxes` are passed directly.
+
+YOLO-E supports two prompt modes. The default `loop` mode runs detection once
+per prompt and retains that prompt's highest-confidence box in each image.
+Set `yoloe_prompt_mode="one-pass"` (or pass `--yoloe-prompt-mode one-pass` to
+training) to set all prompts together and run one detection pass over the
+batch. One-pass mode retains all returned boxes; the result is padded across
+images to the largest detection count in that batch. This can reduce
+proposal-generation time; results can differ from running each prompt
+separately.
 
 YOLO-E defaults to `yoloe-11s-seg.pt`. Its weights and text encoder are
 downloaded on first use. SAM 3 loads the Hugging Face `facebook/sam3` model and
@@ -240,6 +253,7 @@ python scripts/train.py \
   --architecture roi_moe \
   --backbone dinov3 \
   --roi-generator yoloe \
+  --yoloe-prompt-mode one-pass \
   --batch-size 128 \
   --epochs 5 \
   --lr 0.002 \
@@ -258,11 +272,14 @@ The ROI hyperparameters are configurable:
 --attention-k 2
 --segmentation-top-k 3
 --num-attn-heads 4
+--yoloe-prompt-mode one-pass
 ```
 
 `--hidden` aliases `--hidden-dim`; `--num-attention-heads` aliases
-`--num-attn-heads`. The default hidden dimensions are 256 for `image` and 128
-for `roi_moe`. Run `python scripts/train.py --help` to see all options.
+`--num-attn-heads`. `--yoloe-prompt-mode` accepts `loop` (default) or
+`one-pass`; it applies only when `--roi-generator yoloe`. The default hidden
+dimensions are 256 for `image` and 128 for `roi_moe`. Run
+`python scripts/train.py --help` to see all options.
 
 Other useful options:
 

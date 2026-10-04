@@ -105,6 +105,12 @@ def parse_args() -> argparse.Namespace:
         help="Proposal generator when --architecture=roi_moe.",
     )
     parser.add_argument(
+        "--yoloe-prompt-mode",
+        choices=("loop", "one-pass"),
+        default="one-pass",
+        help="Detect YOLO-E prompts separately or together in one inference pass.",
+    )
+    parser.add_argument(
         "--hidden-dim",
         "--hidden",
         dest="hidden_dim",
@@ -402,6 +408,7 @@ def main():
             num_attention_heads=args.num_attn_heads,
             prompts=PROMPTS if args.roi_generator != "none" else (),
             roi_generator=args.roi_generator,
+            yoloe_prompt_mode=args.yoloe_prompt_mode,
             image_backbone_type=args.backbone,
             dinov3_trainable=args.finetune_backbone,
         )

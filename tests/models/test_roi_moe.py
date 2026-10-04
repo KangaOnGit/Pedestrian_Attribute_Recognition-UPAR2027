@@ -243,6 +243,81 @@ class SparseROIAttributeModelTests(unittest.TestCase):
             torch.tensor([0.0, 0.5, 1.0]),
         )
 
+    def test_yoloe_one_pass_keeps_all_boxes_and_pads_batch(self) -> None:
+        class FakeYOLOE:
+            def __init__(self, model_id: str) -> None:
+                self.model_id = model_id
+                self.prompt_calls: list[list[str]] = []
+                self.prediction_calls: list[dict[str, object]] = []
+
+            def set_classes(self, prompts: list[str]) -> None:
+                self.prompt_calls.append(prompts)
+
+            def predict(self, **kwargs: object) -> list[object]:
+                self.prediction_calls.append(kwargs)
+                return [
+                    SimpleNamespace(
+                        boxes=SimpleNamespace(
+                            xyxy=torch.tensor(
+                                [
+                                    [1.0, 2.0, 10.0, 20.0],
+                                    [3.0, 4.0, 30.0, 40.0],
+                                    [5.0, 6.0, 50.0, 60.0],
+                                ]
+                            ),
+                            conf=torch.tensor([0.6, 0.9, 0.8]),
+                            cls=torch.tensor([0.0, 0.0, 1.0]),
+                        )
+                    ),
+                    SimpleNamespace(
+                        boxes=SimpleNamespace(
+                            xyxy=torch.tensor(
+                                [
+                                    [7.0, 8.0, 70.0, 80.0],
+                                    [9.0, 10.0, 90.0, 100.0],
+                                ]
+                            ),
+                            conf=torch.tensor([0.75, 0.85]),
+                            cls=torch.tensor([1.0, 1.0]),
+                        )
+                    ),
+                ]
+
+        with patch.dict(
+            "sys.modules",
+            {"ultralytics": SimpleNamespace(YOLOE=FakeYOLOE)},
+        ):
+            model = self.build_model(
+                prompts=("person", "backpack"),
+                roi_generator="yoloe",
+                yoloe_model_id="test/yoloe",
+                yoloe_score_threshold=0.3,
+                yoloe_prompt_mode="one-pass",
+            )
+            generator = model.roi_proposal_generator
+            assert generator is not None
+            boxes = generator(torch.rand(2, 3, 48, 24), model.prompts)
+
+        self.assertEqual(generator.model.prompt_calls, [["person", "backpack"]])
+        self.assertEqual(len(generator.model.prediction_calls), 1)
+        torch.testing.assert_close(
+            boxes,
+            torch.tensor(
+                [
+                    [
+                        [1.0, 2.0, 10.0, 20.0],
+                        [3.0, 4.0, 30.0, 40.0],
+                        [5.0, 6.0, 50.0, 60.0],
+                    ],
+                    [
+                        [7.0, 8.0, 70.0, 80.0],
+                        [9.0, 10.0, 90.0, 100.0],
+                        [0.0, 0.0, 0.0, 0.0],
+                    ],
+                ]
+            ),
+        )
+
     def test_dinov3_can_be_used_as_full_image_backbone(self) -> None:
         class FakeDINOv3(nn.Module):
             config = SimpleNamespace(hidden_size=12)
