@@ -225,3 +225,5 @@ outputs/
 *.pth
 *.ckpt
 mobileclip_blt.ts
+
+MOCK_README.md

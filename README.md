@@ -1,84 +1,163 @@
 # Pedestrian Attribute Recognition (UPAR2027)
 
-A PyTorch-based pedestrian attribute recognition pipeline for multi-label classification of human attributes such as age, gender, clothing color, accessories, and garment style. The default training model uses pretrained DINOv3 global and regional image features with attribute-aware attention. A prompted ROI mixture-of-experts model is available as an alternate architecture.
+A PyTorch project for multi-label pedestrian attribute recognition (PAR). Given
+an image of a person, the model predicts multiple visual attributes, such as
+age-related appearance, clothing, and accessories. The project supports
+Market1501, PA100k, and PETA annotations, with a DINOv3-based image model and
+an optional prompted region-of-interest (ROI) mixture-of-experts model.
 
 ## Overview
 
-This repository trains a multi-label classifier on CSV-annotated pedestrian images. Each sample is represented as an image path plus binary attribute labels. Training supports a pretrained DINOv3 encoder, an image-only convolutional baseline, and an optional prompted ROI mixture-of-experts model.
+Pedestrian images contain evidence at different scales. Some attributes depend
+on a broad view of the person, while others may be expressed by a small region.
+Attributes can also provide useful context for one another. These properties
+make PAR more than a single whole-image classification problem.
 
-The project includes:
+The repository provides data loading and augmentation, model training,
+multi-label evaluation, checkpointing, and optional Weights & Biases and
+Hugging Face Hub integration.
 
-- Pretrained DINOv3 global and spatial-region features
-- Attribute-query cross-attention and label-interaction layers
-- Optional prompted ROI mixture-of-experts architecture
-- Multi-label attribute prediction using sigmoid outputs
-- Training and evaluation CSV support
-- Dataset subset selection for Market1501, PA100k, and PETA
-- Data augmentation switches for training
-- Checkpointing and metric logging
-- Optional W&B and Hugging Face Hub integration
+## Problem Statement
 
-## Repository structure
+The project focuses on three challenges in pedestrian attribute recognition:
 
-```text
-.
-├── configs/
-│   ├── augmentation.yaml
-│   ├── eval.yaml
-│   ├── miscs.yaml
-│   └── train.yaml
-├── data/
-│   ├── annotations/
-│   ├── Market1501/
-│   ├── PA100k/
-│   └── PETA/
-├── outputs/
-│   └── train/
-├── scripts/
-│   └── train.py
-├── src/
-│   ├── builders/
-│   ├── losses/
-│   ├── metrics/
-│   ├── models/
-│   ├── train/
-│   └── utils/
-├── tests/
-├── .env
-├── LICENSE
-├── requirements.txt
-├── README.md
-└── submission/
+1. **Dataset and person variation.** Similar image color and quality statistics
+   do not eliminate domain shift. Datasets contain different people, clothing,
+   poses, and capture conditions; their image resolutions also vary. Variation
+   in the people themselves can shift the visual distribution even when coarse
+   RGB/HSV and quality statistics look similar.
+2. **Competing evidence and small regions.** PAR predicts many labels from the
+   same image. A pixel or region may provide evidence for multiple attributes,
+   while large regions such as clothing can dominate a whole-image
+   representation. A small but informative region—such as hair, a face, or an
+   accessory—can consequently have less influence than its importance for a
+   particular label warrants.
+3. **Relationships between attributes.** Attributes are not independent:
+   context useful for one prediction can help interpret another. Age-related
+   appearance, for example, may be judged using both facial and clothing cues.
+   A model should be able to use local evidence without losing the broader
+   context and dependencies among its predictions.
+
+## Approach
+
+The model designs use complementary global, local, and label-aware
+representations. The ROI-MoE design is specifically motivated by challenges 2
+and 3:
+
+- **Consistent image preparation:** images are resized to the configured input
+  dimensions and normalized with ImageNet statistics. This gives the model a
+  common tensor size across datasets, but does not remove semantic domain shift
+  between people or datasets.
+- **Pretrained visual features:** the default image backbone uses pretrained
+  DINOv3 features. The image model uses spatial patch tokens so predictions
+  have access to both global context and localized visual information.
+- **Local ROI processing:** the ROI-MoE architecture can use YOLO-E or SAM 3
+  text prompts to propose crops. Processing a crop as its own input is
+  intended to give small or easily overshadowed cues a more direct path into
+  the representation, instead of relying only on their contribution to a
+  whole-image feature.
+- **Learned expert specialization:** sparse top-k routing sends each valid ROI
+  to selected experts. The experts are learnable feature processors, not
+  experts assigned to particular labels; the gating network learns which
+  experts process each region.
+- **Global context alongside ROIs:** full-image features are concatenated with
+  attended ROI-expert features before classification. This lets the classifier
+  use broad person context together with local evidence, including when a
+  proposal is incomplete or unhelpful. It is a complementary path, not a
+  guarantee that proposal errors will be corrected.
+- **Attribute-aware representations and interaction:** in the `image`
+  architecture, a learned query for each attribute attends over visual tokens,
+  then a transformer processes the set of attribute features. This explicitly
+  models relationships among attribute representations. In `roi_moe`,
+  attention summarizes ROI-expert features and sparse classification experts
+  predict the attribute vector from those features and the full-image
+  context.
+- **Imbalance-aware training:** focal loss can derive per-attribute positive
+  and class weights from the selected training labels.
+
+These components provide modeling strategies for the identified challenges;
+they do not constitute a formal domain-adaptation algorithm.
+
+## Model Architectures
+
+### Attribute-aware image model
+
+The default `image` architecture uses a pretrained DINOv3 encoder. Its global
+and spatial patch features are presented to learned per-attribute queries
+through cross-attention. A two-layer transformer then models interactions
+between attribute features, and a shared classifier head outputs one logit per
+attribute.
+
+Use `--backbone conv` for a convolutional encoder trained from scratch. Use
+`--finetune-backbone` to fine-tune DINOv3; otherwise, its pretrained model
+weights are frozen.
+
+### Prompted ROI mixture of experts
+
+The `roi_moe` architecture is motivated by the risk that evidence from small
+regions will be diluted by larger regions when the whole image is represented
+as one feature. Prompted person regions are cropped and routed to their top-k
+ROI experts, which learn to process local visual patterns. Learned attention
+queries combine the resulting expert features, and the model concatenates this
+local representation with a full-image feature. The global branch preserves
+broader context alongside the ROI evidence. A sparse top-k classification
+expert layer then predicts the full attribute vector, returning logits shaped
+`[batch_size, num_attributes]`.
+
+The ROI experts are not assigned one per label, and the attention queries pool
+ROI-expert features rather than directly representing individual labels. The
+explicit per-attribute query and label-interaction transformer described
+above belong to the `image` architecture. In `roi_moe`, attribute predictions
+share the fused representation and selected classification experts. Expert
+routing provides a way for the model to learn specialized processing; it is
+not a claim that experts are inherently superior to a standard feed-forward
+classifier.
+
+YOLO-E and SAM 3 are optional proposal generators. Each returns one
+highest-confidence pixel-coordinate `(x1, y1, x2, y2)` box per prompt and image;
+missing detections use zero-area boxes and are ignored by the ROI encoder.
+Automatic proposal generation can be disabled with `--roi-generator none`, or
+caller-provided `roi_boxes` can be used instead.
+
+The ROI model accepts two normalized image tensors plus an optional detector
+view:
+
+```python
+from src.models import SparseROIAttributeModel
+
+model = SparseROIAttributeModel(
+    num_classes=40,
+    hidden_dim=128,
+    num_experts=5,
+    attention_k=2,
+    roi_generator="yoloe",
+    prompts=("person", "backpack"),
+)
+
+# The first two inputs use the configured ImageNet normalization.
+# The detector view is resized RGB in [0, 1], before that normalization.
+logits = model(
+    images_aug,
+    images_no_aug,
+    images_detector=images_detector,
+)
 ```
 
-## Requirements
+The training data loader creates the detector view only when automatic ROI
+generation is enabled. It is a separate resized RGB tensor in `[0, 1]`, so
+YOLO-E receives the pixel range it expects without changing the normalized
+images used by the model. It is not required when automatic proposals are
+disabled or when `roi_boxes` are passed directly.
 
-- Python 3.10+
-- PyTorch and Torchvision
-- Optional: CUDA-capable GPU for faster training
+YOLO-E defaults to `yoloe-11s-seg.pt`. Its weights and text encoder are
+downloaded on first use. SAM 3 loads the Hugging Face `facebook/sam3` model and
+processor at construction time; access may require accepting the model terms
+and authenticating with Hugging Face. SAM 3 runs once per image and prompt,
+which can increase proposal-generation time.
 
-Install dependencies:
+## Data
 
-```bash
-pip install -r requirements.txt
-```
-
-## Environment configuration
-
-The project reads environment variables from a `.env` file using `python-dotenv`.
-
-Create a `.env` file in the project root with the following variables when using W&B or Hugging Face upload features:
-
-```env
-HF_TOKEN=your_huggingface_token
-WANDB_API_KEY=your_wandb_key
-```
-
-If you do not need remote logging or Hub uploads, the training pipeline can still run without these values.
-
-## Dataset setup
-
-The expected data layout is:
+Place the annotations and images under `data/`:
 
 ```text
 data/
@@ -87,27 +166,55 @@ data/
 │   └── val.csv
 ├── Market1501/
 ├── PA100k/
-├── PETA/
+└── PETA/
 ```
 
-The CSV files are expected to have a `# image` column followed by binary attribute columns. The loader resolves each image path relative to the repository root by prepending `data/`.
-
-Example:
+Each CSV must contain a `# image` column followed by one binary column per
+attribute. Image paths are resolved relative to the repository's `data/`
+directory.
 
 ```csv
 # image,Age-Young,Age-Adult,...
-Market1501/bounding_box_train/0002_c1s1_000451_03.jpg,0,1,0,...
+Market1501/bounding_box_train/0002_c1s1_000451_03.jpg,0,1,...
 ```
 
-The project also supports dataset subset selection with the `--dataset` flag using values:
+Use `--dataset market`, `--dataset pa`, or `--dataset peta` to select a dataset
+subset using the configured CSV row ranges. By default, training and validation
+use all rows in their respective CSV files; sample-limit options are available
+for smaller experiments.
 
-- `market`
-- `pa`
-- `peta`
+## Requirements and Setup
+
+- Python 3.10 or newer
+- Dependencies listed in [requirements.txt](requirements.txt)
+- A CUDA-capable GPU is recommended for faster training; CPU execution is also
+  supported
+
+Install dependencies from the repository root:
+
+```bash
+pip install -r requirements.txt
+```
+
+Pretrained DINOv3, YOLO-E, and SAM 3 weights may require network access on
+first use. YOLO-E and SAM 3 are only needed for ROI training with those
+generators.
+
+### Optional credentials
+
+Create a `.env` file in the repository root when using Weights & Biases or
+Hugging Face features:
+
+```env
+WANDB_API_KEY=your_wandb_key
+HF_TOKEN=your_huggingface_token
+```
+
+Training without remote logging or Hub upload does not require these values.
 
 ## Training
 
-Run training from the project root:
+Train the default DINOv3 attribute-aware image model:
 
 ```bash
 python scripts/train.py \
@@ -117,191 +224,123 @@ python scripts/train.py \
   --backbone dinov3 \
   --batch-size 128 \
   --epochs 5 \
-  --lr 3e-4 \
+  --lr 0.002 \
   --weight-decay 1e-5 \
   --optimizer adamw \
-  --loss bce \
+  --loss focal \
   --output-dir outputs/train
 ```
 
-Common training options:
+Train the ROI mixture-of-experts model with YOLO-E proposals:
 
 ```bash
-python scripts/train.py --help
+python scripts/train.py \
+  --train-csv data/annotations/train.csv \
+  --val-csv data/annotations/val.csv \
+  --architecture roi_moe \
+  --backbone dinov3 \
+  --roi-generator yoloe \
+  --batch-size 128 \
+  --epochs 5 \
+  --lr 0.002 \
+  --weight-decay 1e-5 \
+  --optimizer adamw \
+  --loss focal \
+  --output-dir outputs/roi_moe
 ```
 
-Some useful flags include:
+The ROI hyperparameters are configurable:
+
+```bash
+--hidden-dim 128
+--num-experts 5
+--roi-top-k 1
+--attention-k 2
+--segmentation-top-k 3
+--num-attn-heads 4
+```
+
+`--hidden` aliases `--hidden-dim`; `--num-attention-heads` aliases
+`--num-attn-heads`. The default hidden dimensions are 256 for `image` and 128
+for `roi_moe`. Run `python scripts/train.py --help` to see all options.
+
+Other useful options:
 
 ```bash
 --dataset market
---all-training-data
 --train-num-samples 2000
 --eval-num-samples 500
---augment
+--no-augment
+--finetune-backbone
+--resume outputs/train/last_epoch.pt
 --wandb
 --wandb-project UPAR2027
---wandb-entity denison
+--wandb-run-name experiment-name
 --hub-repo-id your-org/your-model-name
---resume outputs/train/last_epoch.pt
+--hub-private
 ```
 
-Training and validation use their full CSV splits by default. The sample-count
-flags above are optional limits for faster experiments.
+Training augmentations and ImageNet normalization are configured in
+[configs/augmentation.yaml](configs/augmentation.yaml). The input size can be
+changed with `--height` and `--width`.
 
-## Configuration
+## Training Design
 
-Training behavior is controlled by YAML files under `configs/`:
+The default settings are read from [configs/train.yaml](configs/train.yaml)
+and can be overridden on the command line. Current defaults include five
+epochs, batch size 128, learning rate `0.002`, AdamW, focal loss, and `256 x
+256` input images.
 
-- `configs/train.yaml`: learning rate, epochs, optimizer, batch size, loss, output directory, augmentation flags
-- `configs/eval.yaml`: validation sampling settings
-- `configs/miscs.yaml`: W&B project/entity defaults
+Supported losses are:
 
-When using focal loss, per-attribute positive and class weights are calculated
-from the labels in the selected training set to account for label imbalance.
+- `bce`: binary cross-entropy with logits
+- `weighted_bce`: binary cross-entropy with configured positive weights
+- `focal`: focal loss with positive/class weights derived from the training
+  labels when available
 
-The default training config currently sets:
+When DINOv3 is trainable, its optimizer parameter group uses a learning rate
+one hundredth of the head learning rate. The optimizer options are `adamw` and
+`sgd`.
 
-```yaml
-default:
-  seed: 42
+## Evaluation and Outputs
 
-hyper_param:
-  lr: 3.e-4
-  epochs: 5
-  batch_size: 128
-  loss: "bce"
-  optim: "adamw"
-```
-
-## Outputs
-
-Training writes checkpoints and metrics to `outputs/train/` by default. The checkpoint names include:
-
-- `best_mA.pt`
-- `best_f1.pt`
-- `last_epoch.pt`
-- `train_results.csv`
-
-The CSV stores epoch-wise metrics including:
-
-- `epoch`
-- `train_loss`
-- `eval_loss`
-- `challenge_avg`
-- `mA`
-- `label_f1`
-- `inst_acc`
-- `inst_prec`
-- `inst_rec`
-- `inst_f1`
-- `learning_rate`
-
-## Evaluation metrics
-
-Validation metrics are computed with a sigmoid threshold of 0.5. The code reports:
+Validation converts logits to probabilities with sigmoid and uses a default
+threshold of `0.5`. Reported metrics include:
 
 - Challenge average
 - Label mean accuracy (`mA`)
 - Label F1
 - Instance accuracy, precision, recall, and F1
 
-This follows the multi-label classification evaluation flow in `src/metrics/run.py`.
+Training writes checkpoints and epoch metrics to `outputs/train/` by default:
 
-## Model architectures
+- `best_mA.pt`
+- `best_f1.pt`
+- `last_epoch.pt`
+- `train_results.csv`
 
-The default `image` architecture uses a pretrained DINOv3 image encoder. Its
-global feature and individual spatial patch features are presented to learned
-per-attribute queries. Those queries attend over visual tokens, then interact
-through a transformer encoder before producing attribute logits. This preserves
-global context while allowing each attribute to emphasize relevant image
-patches and model dependencies with other attributes.
+The checkpoints include model, optimizer, scheduler, epoch, and metric state
+for resuming training.
 
-Use `--backbone conv` for a from-scratch baseline, or `--finetune-backbone` to
-fine-tune DINOv3 with a lower learning rate than the classification head.
+## Repository Structure
 
-`--architecture roi_moe` selects `src.models.SparseROIAttributeModel` for
-prompted pedestrian ROIs and full-image context. It uses sparse top-k routing to
-send each ROI to only its selected ROI expert, attends over the per-expert
-features with `attention_k` learned queries, concatenates that feature with the
-full-image feature, and routes the fused representation through a five-expert
-classification head. The returned tensor contains **logits** shaped
-`[batch_size, num_classes]`; train it with a multi-label logits loss such as
-`BCEWithLogitsLoss`.
-
-The ROI model parameters can be set on the training command:
-
-```bash
-python scripts/train.py \
-  --architecture roi_moe \
-  --hidden-dim 128 \
-  --num-experts 5 \
-  --roi-top-k 1 \
-  --attention-k 2 \
-  --segmentation-top-k 3 \
-  --num-attn-heads 4
+```text
+.
+├── configs/       # Training, augmentation, evaluation, prompt, and logging configuration
+├── data/          # Annotation CSVs and pedestrian image datasets
+├── scripts/       # Training entry point
+├── src/
+│   ├── builders/  # Data-loader, loss, and optimizer builders
+│   ├── metrics/   # Label-, instance-, and challenge-level evaluation
+│   ├── models/    # Image and ROI mixture-of-experts architectures
+│   ├── train/     # Dataset transforms, training loop, and checkpoints
+│   └── utils/     # Configuration, logging, and integration helpers
+├── tests/         # Regression and unit tests
+├── submission/    # Submission package scaffold
+├── requirements.txt
+└── README.md
 ```
-
-`--hidden` is also accepted as an alias for `--hidden-dim`, and
-`--num-attention-heads` is an alias for `--num-attn-heads`. Hidden dimension
-defaults remain 256 for the `image` architecture and 128 for `roi_moe`.
-
-```python
-from src.models import SparseROIAttributeModel
-
-model = SparseROIAttributeModel(
-    num_classes=40,
-    hidden_dim=256,
-    num_experts=4,
-    attention_k=2,
-    roi_generator="yoloe",
-    prompts=("person", "backpack"),
-)
-logits = model(images_aug, images_no_aug, images_detector=images_detector)
-```
-
-YOLO-E is the default prompt-based ROI generator. It applies the text prompts
-once and detects all images in each batch together, returning
-pixel-coordinate `(x1, y1, x2, y2)` boxes. Its default checkpoint is
-`yoloe-11s-seg.pt`; pass `yoloe_model_id` or `yoloe_score_threshold` to customize
-it. The first prompted run downloads the YOLO-E weights and its text encoder,
-so it requires network access.
-
-Setting `roi_generator="sam3"` loads the Hugging Face `facebook/sam3` model and
-processor during model construction; SAM 3 runs each configured text prompt and
-returns pixel-coordinate `(x1, y1, x2, y2)` boxes. SAM 3 weights may require
-accepting the upstream model terms and authenticating with Hugging Face. Set
-`roi_generator="none"` to disable automatic proposals, or pass `roi_boxes`
-directly to `forward`; direct boxes take precedence over generated boxes.
-SAM 3 remains available as an alternative but runs once per image and prompt,
-so larger batches or prompt lists increase proposal-generation time.
-
-DINOv3 is available as an optional full-image feature encoder, not as a
-text-prompted box detector:
-
-```python
-model = SparseROIAttributeModel(
-    num_classes=40,
-    hidden_dim=256,
-    num_experts=4,
-    attention_k=2,
-    roi_generator="sam3",
-    prompts=("person", "backpack"),
-    image_backbone_type="dinov3",
-)
-```
-
-The default full-image and ROI encoders are compact convolutional encoders.
-Model inputs use the ImageNet mean/std normalization configured by the training
-pipeline. The data loader also supplies `images_detector`, a resized RGB tensor
-in `[0, 1]` before ImageNet normalization, for proposal detectors. Custom image
-and ROI encoders may be passed in if they return `[batch, hidden_dim]`.
-
-## Notes
-
-- The code uses `argparse` for command-line configuration; no separate training notebook is required.
-- Augmentation is controlled by flags in the config and can be toggled with the `--augment` option.
-- The project includes optional Weights & Biases logging and Hugging Face folder uploads for trained artifacts.
 
 ## License
 
-This project is distributed under the MIT license. See [LICENSE](LICENSE) for details.
+This project is distributed under the terms in [LICENSE](LICENSE).
