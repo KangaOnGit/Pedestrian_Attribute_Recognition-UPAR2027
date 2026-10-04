@@ -202,6 +202,65 @@ class Trainer:
             loss = self.criterion(logits, labels)
 
             loss.backward()
+            should_log_gradients = batch_idx % self.logging_steps == 0
+            loss_is_finite = bool(torch.isfinite(loss.detach()).item())
+            if should_log_gradients or not loss_is_finite:
+                gradient_metrics, nonfinite_gradients = self._gradient_diagnostics()
+                if nonfinite_gradients:
+                    log.error(
+                        "Non-finite gradients at epoch %d batch %d (global step %d): %s",
+                        epoch,
+                        batch_idx,
+                        self.global_step + 1,
+                        ", ".join(nonfinite_gradients),
+                    )
+                elif not loss_is_finite:
+                    log.error(
+                        "Non-finite loss at epoch %d batch %d (global step %d); "
+                        "gradients are finite.",
+                        epoch,
+                        batch_idx,
+                        self.global_step + 1,
+                    )
+
+                if should_log_gradients:
+                    log.info(
+                        "Gradient diagnostics | epoch %d | batch %d/%d | "
+                        "global_step %d | global_norm %.6g | gradients %d/%d | "
+                        "missing %d | nonfinite %d | per_module_norm %s | "
+                        "missing_by_module %s",
+                        epoch,
+                        batch_idx,
+                        len(self.train_loader),
+                        self.global_step + 1,
+                        gradient_metrics["grad_norm"],
+                        int(gradient_metrics["grad_parameter_count"]),
+                        int(gradient_metrics["grad_trainable_parameter_count"]),
+                        int(gradient_metrics["grad_missing_parameter_count"]),
+                        int(gradient_metrics["grad_nonfinite_count"]),
+                        {
+                            name.removeprefix("grad_norm/"): value
+                            for name, value in gradient_metrics.items()
+                            if name.startswith("grad_norm/")
+                        },
+                        {
+                            name.removeprefix("grad_missing/"): value
+                            for name, value in gradient_metrics.items()
+                            if name.startswith("grad_missing/")
+                        },
+                    )
+                if should_log_gradients or not loss_is_finite:
+                    log_wandb(
+                        self.wandb_run,
+                        {
+                            **gradient_metrics,
+                            "train_batch_loss": float(loss.detach().item()),
+                            "global_step": self.global_step + 1,
+                            "epoch": epoch,
+                            "batch": batch_idx,
+                        },
+                    )
+
             self.optimizer.step()
 
             total_loss += loss.item()
@@ -225,6 +284,64 @@ class Trainer:
         if not self.train_loader:
             raise ValueError("Training data loader is empty.")
         return total_loss / len(self.train_loader)
+
+    def _gradient_diagnostics(self) -> tuple[dict[str, float], list[str]]:
+        """Summarize gradient norms by model component and identify non-finite gradients."""
+        squared_norms: dict[str, torch.Tensor] = {}
+        missing_gradients: dict[str, int] = {}
+        nonfinite_gradients: list[str] = []
+        parameter_count = 0
+        trainable_parameter_count = 0
+
+        for name, parameter in self.model.named_parameters():
+            if not parameter.requires_grad:
+                continue
+
+            trainable_parameter_count += 1
+            component = name.split(".", maxsplit=1)[0]
+            gradient = parameter.grad
+            if gradient is None:
+                missing_gradients[component] = missing_gradients.get(component, 0) + 1
+                continue
+
+            parameter_count += 1
+            detached_gradient = gradient.detach()
+            squared_norm = detached_gradient.float().square().sum()
+            if component in squared_norms:
+                squared_norms[component] = squared_norms[component] + squared_norm
+            else:
+                squared_norms[component] = squared_norm
+
+            if not torch.isfinite(detached_gradient).all():
+                nonfinite_gradients.append(name)
+
+        global_squared_norm = (
+            torch.stack(tuple(squared_norms.values())).sum()
+            if squared_norms
+            else torch.zeros((), device=self.device)
+        )
+        metrics = {
+            "grad_norm": float(global_squared_norm.sqrt().item()),
+            "grad_parameter_count": float(parameter_count),
+            "grad_trainable_parameter_count": float(trainable_parameter_count),
+            "grad_missing_parameter_count": float(
+                sum(missing_gradients.values())
+            ),
+            "grad_nonfinite_count": float(len(nonfinite_gradients)),
+        }
+        metrics.update(
+            {
+                f"grad_norm/{component}": float(squared_norm.sqrt().item())
+                for component, squared_norm in squared_norms.items()
+            }
+        )
+        metrics.update(
+            {
+                f"grad_missing/{component}": float(count)
+                for component, count in missing_gradients.items()
+            }
+        )
+        return metrics, nonfinite_gradients
 
     @torch.no_grad()
     def eval(
