@@ -60,14 +60,19 @@ class FocalLoss(nn.Module):
         if self.gamma == 0.0:
             focal_modulation = torch.ones_like(logits)
         else:
-            log_focal_base = torch.logaddexp(
-                targets.log() + F.logsigmoid(-logits),
-                torch.log1p(-targets) + F.logsigmoid(logits),
+            log_one_minus_pt = torch.where(
+                targets > 0.5,
+                F.logsigmoid(-logits),
+                F.logsigmoid(logits),
             )
-            focal_modulation = torch.exp(self.gamma * log_focal_base)
-        focal_weight = alpha_t * focal_modulation
 
-        loss = focal_weight * ce_loss
+            focal_modulation = torch.exp(
+                self.gamma * log_one_minus_pt
+            )
+
+        loss = alpha_t * focal_modulation * ce_loss
+
         if self.class_weight is not None:
             loss = loss * self.class_weight
+
         return loss.mean()
