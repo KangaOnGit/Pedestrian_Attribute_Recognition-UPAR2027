@@ -26,11 +26,11 @@ hyper_param:
   random_resized_crop: False
   affine: True
   safe_rotate: False
-  coarse_dropout: True
-  gaussian_blur: False
-  color_jitter: False
+  coarse_dropout: False
+  gaussian_blur: True
+  color_jitter: True
   rgb_shift: False
-  image_compression: False
+  image_compression: True
 
   # Resize
   height: 256
@@ -44,7 +44,7 @@ data:
 losses:
   focal:
     alpha: 0.5
-    gamma: 0.2
+    gamma: 2
 
   weighted_bce:
     weight:
