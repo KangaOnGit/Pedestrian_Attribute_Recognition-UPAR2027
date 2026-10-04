@@ -93,7 +93,7 @@ class Sam3PromptBoxGenerator:
         return prompt_boxes
 
 class YOLOEPromptBoxGenerator:
-    """Detect each prompt separately and keep its highest-confidence box per image."""
+    """Detect prompts on resized RGB pixels in [0, 1], keeping each top box."""
 
     def __init__(
         self,
@@ -108,30 +108,30 @@ class YOLOEPromptBoxGenerator:
     @torch.inference_mode()
     def __call__(
         self,
-        images_no_aug: Float[Tensor, "B 3 H W"],
+        images_rgb: Float[Tensor, "B 3 H W"],
         prompts: Sequence[str],
     ) -> Float[Tensor, "B P 4"]:
         if not prompts or any(not prompt.strip() for prompt in prompts):
             raise ValueError("YOLO-E requires a non-empty list of non-blank prompts")
-        if images_no_aug.ndim != 4 or images_no_aug.shape[1] != 3:
+        if images_rgb.ndim != 4 or images_rgb.shape[1] != 3:
             raise ValueError("YOLO-E requires RGB images shaped [B, 3, H, W]")
-        if not torch.is_floating_point(images_no_aug):
-            raise ValueError("YOLO-E expects floating-point, ImageNet-normalized images")
+        if not torch.is_floating_point(images_rgb):
+            raise ValueError("YOLO-E expects floating-point RGB images in the [0, 1] range")
 
         # P is prompt_length
         # Each image in batch will have P bounding boxes with its 4 coordinates
-        prompt_boxes: Float[torch.Tensor, "B P 4"] = images_no_aug.new_zeros(
-            (images_no_aug.shape[0], len(prompts), 4)
+        prompt_boxes: Float[torch.Tensor, "B P 4"] = images_rgb.new_zeros(
+            (images_rgb.shape[0], len(prompts), 4)
         )
         for prompt_index, prompt in enumerate(prompts):
             self.model.set_classes([prompt])
             results = self.model.predict(
-                source=images_no_aug,
+                source=images_rgb,
                 conf=self.score_threshold,
-                device=str(images_no_aug.device),
+                device=str(images_rgb.device),
                 verbose=False,
             )
-            if len(results) != images_no_aug.shape[0]:
+            if len(results) != images_rgb.shape[0]:
                 raise ValueError("YOLO-E must return one result per input image")
 
             for image_index, result in enumerate(results):
@@ -141,12 +141,12 @@ class YOLOEPromptBoxGenerator:
                 # R is number of bbox generated
                 boxes: Float[torch.Tensor, "R 4"] = torch.as_tensor(
                     result.boxes.xyxy,
-                    device=images_no_aug.device,
-                    dtype=images_no_aug.dtype,
+                    device=images_rgb.device,
+                    dtype=images_rgb.dtype,
                 )
                 confidences: Float[torch.Tensor, "R"] = torch.as_tensor(
                     result.boxes.conf,
-                    device=images_no_aug.device,
+                    device=images_rgb.device,
                 )
                 if boxes.ndim != 2 or boxes.shape[-1] != 4:
                     raise ValueError("YOLO-E must return boxes shaped [R, 4]")

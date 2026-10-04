@@ -28,6 +28,9 @@ def build_dataloaders(args,
             else args.train_num_samples
         ),
         aug=args.augment,
+        include_detector_images=(
+            args.architecture == "roi_moe" and args.roi_generator != "none"
+        ),
         **train_aug_flags,
         height = height,
         width = width,
@@ -42,6 +45,9 @@ def build_dataloaders(args,
         **eval_aug_flags,
         height = height,
         width = width,
+        include_detector_images=(
+            args.architecture == "roi_moe" and args.roi_generator != "none"
+        ),
     )
 
     pin_memory = device.type == "cuda"

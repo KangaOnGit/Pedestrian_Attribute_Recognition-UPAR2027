@@ -184,7 +184,10 @@ class SparseROIAttributeModel(nn.Module):
     def forward(self,
                 images_aug: Float[torch.Tensor, "B 3 H W"],
                 images_no_aug: Float[torch.Tensor, "B 3 H W"],
-                roi_boxes: Tensor | None = None) -> Float[Tensor, "B K"]:
+                roi_boxes: Tensor | None = None,
+                *,
+                images_detector: Float[torch.Tensor, "B 3 H W"] | None = None,
+                ) -> Float[Tensor, "B K"]:
         """Return multi-label class logits shaped ``[B, num_classes]``.
 
         ``roi_boxes`` uses pixel-coordinate ``(x1, y1, x2, y2)`` values and
@@ -205,7 +208,15 @@ class SparseROIAttributeModel(nn.Module):
 
         # P is len(prompts)
         if roi_boxes is None and self.roi_proposal_generator is not None:
-            roi_boxes: Float[torch.Tensor, "B P 4"] = self.roi_proposal_generator(images_no_aug, self.prompts)
+            if images_detector is None:
+                raise ValueError(
+                    "images_detector is required for automatic ROI generation; "
+                    "it must contain resized RGB pixels in the [0, 1] range"
+                )
+            roi_boxes: Float[torch.Tensor, "B P 4"] = self.roi_proposal_generator(
+                images_detector,
+                self.prompts,
+            )
             
         if roi_boxes is None:
             roi_boxes: Float[torch.Tensor, "B 0 4"] = images_aug.new_empty((batch_size, 0, 4))
@@ -297,9 +308,9 @@ class SparseROIAttributeModel(nn.Module):
         if num_rois == 0:
             return images.new_empty((0, images.shape[1], *self.roi_size)), valid
         
-        valid_box_indices: tuple[Tensor, Tensor] = torch.where(valid)
-        box_batch: Int64[Tensor, "N"] = valid_box_indices[0]
-        box_index: Int64[Tensor, "N"] = valid_box_indices[1]
+        valid_box_indices: tuple[torch.Tensor, torch.Tensor] = torch.where(valid)
+        box_batch: Int[torch.Tensor, "N"] = valid_box_indices[0]
+        box_index: Int[torch.Tensor, "N"] = valid_box_indices[1]
         valid_boxes: Float[torch.Tensor, "N 4"] = boxes[box_batch, box_index]
         
         x1: Float[torch.Tensor, "N"] = valid_boxes[:, 0].clamp(0, image_width)
@@ -355,7 +366,7 @@ class SparseROIAttributeModel(nn.Module):
             return roi_features, expert_present
 
         valid_indices: tuple[torch.Tensor, torch.Tensor] = torch.where(valid)
-        valid_batches: Int64[torch.Tenso, "N"] = valid_indices[0]
+        valid_batches: Int[torch.Tensor, "N"] = valid_indices[0]
         roi_statistics: Float[torch.Tensor, "N 2*in_channels"] = torch.cat(
             (
                 rois.mean(dim=(-1, -2)),
@@ -364,7 +375,7 @@ class SparseROIAttributeModel(nn.Module):
             dim=-1,
         )
         routing_logits: Float[torch.Tensor, "N E"] = self.roi_router(roi_statistics)
-        probabilities: Float[torch.Tensorr, "N E"] = routing_logits.softmax(dim=-1)
+        probabilities: Float[torch.Tensor, "N E"] = routing_logits.softmax(dim=-1)
         selected: Bool[torch.Tensor, "N E"] = torch.zeros_like(
             probabilities,
             dtype=torch.bool,
@@ -460,8 +471,8 @@ class SparseROIAttributeModel(nn.Module):
             selected_locations: tuple[torch.Tensor, torch.Tensor] = torch.where(
                 selected_indices == expert_index
             )
-            image_indices: Int[Tensor, "M"] = selected_locations[0]
-            topk_slots: Int[Tensor, "M"] = selected_locations[1]
+            image_indices: Int[torch.Tensor, "M"] = selected_locations[0]
+            topk_slots: Int[torch.Tensor, "M"] = selected_locations[1]
             if not image_indices.numel():
                 continue
             expert_logits: Float[torch.Tensor, "M K"] = expert(fused_features[image_indices])

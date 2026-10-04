@@ -23,6 +23,7 @@ def build_transforms(
     rgb_shift: bool = True,
     image_compression: bool = True,
     split: str = "train",
+    normalize: bool = True,
 ) -> A.Compose:
 
     """
@@ -53,6 +54,8 @@ def build_transforms(
         rgb_shift: Enable/disable RGBShift.
 
         image_compression: Enable/disable ImageCompression.
+
+        normalize: Apply the configured ImageNet normalization.
 
         Returns:
             A.Compose: Albumentations transformation pipeline.
@@ -186,14 +189,14 @@ def build_transforms(
             )
         )
 
-    # Normalize
-    c = config["norm"]
-    transforms.append(
-        A.Normalize(
-            mean=c["mean"],
-            std=c["std"],
+    if normalize:
+        c = config["norm"]
+        transforms.append(
+            A.Normalize(
+                mean=c["mean"],
+                std=c["std"],
+            )
         )
-    )
 
     transforms.append(
         ToTensorV2()

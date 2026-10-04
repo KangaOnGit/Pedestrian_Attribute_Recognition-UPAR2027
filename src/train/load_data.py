@@ -33,6 +33,7 @@ class UPAR_dataset(Dataset):
         color_jitter: bool = True,
         rgb_shift: bool = True,
         image_compression: bool = True,
+        include_detector_images: bool = False,
     ):
         """
         Args:
@@ -53,6 +54,9 @@ class UPAR_dataset(Dataset):
 
             aug:
                 Whether to use data augmentation
+
+            include_detector_images:
+                Also return resized RGB pixels scaled to [0, 1] for proposal detectors.
         """
 
         # Dataset boundaries depend on which CSV we are using.
@@ -123,6 +127,7 @@ class UPAR_dataset(Dataset):
         self.split: str = split
         self.data_name: str | None = data_name
         self.aug: bool = aug
+        self.include_detector_images: bool = include_detector_images
         self.horizontal_flip: bool = horizontal_flip
         self.random_resized_crop: bool = random_resized_crop
         self.affine: bool = affine
@@ -168,6 +173,27 @@ class UPAR_dataset(Dataset):
             split=self.split,
         )
 
+        self.transform_detector = (
+            build_transforms(
+                dataset=self.data_name,
+                height=self.height,
+                width=self.width,
+                horizontal_flip=False,
+                random_resized_crop=False,
+                affine=False,
+                safe_rotate=False,
+                coarse_dropout=False,
+                gaussian_blur=False,
+                color_jitter=False,
+                rgb_shift=False,
+                image_compression=False,
+                split=self.split,
+                normalize=False,
+            )
+            if self.include_detector_images
+            else None
+        )
+
         log.info(
             f"Using data {self.data_name} with aug {self.aug} "
             f"and {len(self.csv)} samples"
@@ -180,6 +206,11 @@ class UPAR_dataset(Dataset):
         self,
         idx: int,
     ) -> tuple[
+        Float[torch.Tensor, "C H W"],
+        Float[torch.Tensor, "C H W"],
+        Float[torch.Tensor, "C H W"],
+        Float[torch.Tensor, "K"],
+    ] | tuple[
         Float[torch.Tensor, "C H W"],
         Float[torch.Tensor, "C H W"],
         Float[torch.Tensor, "K"],
@@ -201,4 +232,12 @@ class UPAR_dataset(Dataset):
             image=image_array
         )["image"]
 
-        return image_aug, image_no_aug, label
+        if self.transform_detector is None:
+            return image_aug, image_no_aug, label
+
+        image_detector: Float[torch.Tensor, "C H W"] = (
+            self.transform_detector(image=image_array)["image"]
+            .to(dtype=torch.float32)
+            .div(255.0)
+        )
+        return image_aug, image_no_aug, image_detector, label

@@ -256,7 +256,7 @@ model = SparseROIAttributeModel(
     roi_generator="yoloe",
     prompts=("person", "backpack"),
 )
-logits = model(images)
+logits = model(images_aug, images_no_aug, images_detector=images_detector)
 ```
 
 YOLO-E is the default prompt-based ROI generator. It applies the text prompts
@@ -291,10 +291,10 @@ model = SparseROIAttributeModel(
 ```
 
 The default full-image and ROI encoders are compact convolutional encoders.
-Images are expected to use the ImageNet mean/std normalization configured by the
-training pipeline; the detector and DINOv3 preprocessing convert them back to
-RGB before their Hugging Face processors run. Custom image and ROI encoders may
-be passed in if they return `[batch, hidden_dim]`.
+Model inputs use the ImageNet mean/std normalization configured by the training
+pipeline. The data loader also supplies `images_detector`, a resized RGB tensor
+in `[0, 1]` before ImageNet normalization, for proposal detectors. Custom image
+and ROI encoders may be passed in if they return `[batch, hidden_dim]`.
 
 ## Notes
 

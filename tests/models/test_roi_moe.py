@@ -128,10 +128,11 @@ class SparseROIAttributeModelTests(unittest.TestCase):
                 sam3_model_id="test/sam3",
             )
             images = torch.randn(2, 3, 48, 24)
+            images_detector = torch.rand(2, 3, 48, 24)
             generator = model.roi_proposal_generator
             assert generator is not None
             generated_boxes = generator(images, model.prompts)
-            logits = model(images, images)
+            logits = model(images, images, images_detector=images_detector)
 
         self.assertEqual(tuple(logits.shape), (2, 7))
         self.assertEqual(tuple(generated_boxes.shape), (2, 2, 4))
@@ -201,11 +202,17 @@ class SparseROIAttributeModelTests(unittest.TestCase):
                 yoloe_model_id="test/yoloe",
                 yoloe_score_threshold=0.5,
             )
-            images = torch.zeros(2, 3, 48, 24)
+            images_detector = torch.empty(2, 3, 48, 24)
+            images_detector[:, 0] = 0.0
+            images_detector[:, 1] = 0.5
+            images_detector[:, 2] = 1.0
+            imagenet_mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
+            imagenet_std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
+            images = (images_detector - imagenet_mean) / imagenet_std
             generator = model.roi_proposal_generator
             assert generator is not None
-            generated_boxes = generator(images, model.prompts)
-            logits = model(images, images)
+            generated_boxes = generator(images_detector, model.prompts)
+            logits = model(images, images, images_detector=images_detector)
 
         self.assertEqual(tuple(logits.shape), (2, 7))
         self.assertEqual(generator.model.model_id, "test/yoloe")
@@ -233,7 +240,7 @@ class SparseROIAttributeModelTests(unittest.TestCase):
         self.assertEqual(tuple(source.shape), (2, 3, 48, 24))
         torch.testing.assert_close(
             source[0, :, 0, 0],
-            torch.zeros(3),
+            torch.tensor([0.0, 0.5, 1.0]),
         )
 
     def test_dinov3_can_be_used_as_full_image_backbone(self) -> None:

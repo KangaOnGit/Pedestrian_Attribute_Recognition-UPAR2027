@@ -18,6 +18,7 @@ from src.utils.hf_hub import push_folder_to_hub
 from src.utils.wb import log_wandb
 from src.metrics.run import run_metrics
 from src.metrics.base import eval_metrics
+from src.models.roi_moe import SparseROIAttributeModel
 
 CONFIG = load_config("configs/train.yaml")
 
@@ -189,7 +190,13 @@ class Trainer:
 
         total_loss: float = 0.0
 
-        for batch_idx, (images_aug, images_no_aug, labels) in enumerate(self.train_loader, start=1):
+        for batch_idx, batch in enumerate(self.train_loader, start=1):
+            if len(batch) == 4:
+                images_aug, images_no_aug, images_detector, labels = batch
+                images_detector = images_detector.to(self.device)
+            else:
+                images_aug, images_no_aug, labels = batch
+                images_detector = None
 
             images_aug: Float[torch.Tensor, "B C H W"] = images_aug.to(self.device)
             images_no_aug: Float[torch.Tensor, "B C H W"] = images_no_aug.to(self.device)
@@ -197,8 +204,14 @@ class Trainer:
             
             self.optimizer.zero_grad()
 
-            logits: Float[torch.Tensor, "B K"] = self.model(images_aug,
-                                                            images_no_aug)
+            if isinstance(self.model, SparseROIAttributeModel):
+                logits: Float[torch.Tensor, "B K"] = self.model(
+                    images_aug,
+                    images_no_aug,
+                    images_detector=images_detector,
+                )
+            else:
+                logits = self.model(images_aug)
             loss = self.criterion(logits, labels)
 
             loss.backward()
@@ -353,14 +366,26 @@ class Trainer:
         all_predictions: list[torch.Tensor] = []
         all_labels: list[torch.Tensor] = []
 
-        for images_aug, images_no_aug, labels in self.eval_loader:
+        for batch in self.eval_loader:
+            if len(batch) == 4:
+                images_aug, images_no_aug, images_detector, labels = batch
+                images_detector = images_detector.to(self.device)
+            else:
+                images_aug, images_no_aug, labels = batch
+                images_detector = None
             
             images_aug: Float[torch.Tensor, "B C H W"] = images_aug.to(self.device)
             images_no_aug: Float[torch.Tensor, "B C H W"] = images_no_aug.to(self.device)
             labels: Float[torch.Tensor, "B K"] = labels.to(self.device)
 
-            logits: Float[torch.Tensor, "B K"] = self.model(images_aug,
-                                                            images_no_aug,)
+            if isinstance(self.model, SparseROIAttributeModel):
+                logits: Float[torch.Tensor, "B K"] = self.model(
+                    images_aug,
+                    images_no_aug,
+                    images_detector=images_detector,
+                )
+            else:
+                logits = self.model(images_aug)
 
             loss = self.criterion(logits, labels)
             val_loss += loss.item()
