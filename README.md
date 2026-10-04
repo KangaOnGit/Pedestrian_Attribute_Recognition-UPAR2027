@@ -228,6 +228,23 @@ classification head. The returned tensor contains **logits** shaped
 `[batch_size, num_classes]`; train it with a multi-label logits loss such as
 `BCEWithLogitsLoss`.
 
+The ROI model parameters can be set on the training command:
+
+```bash
+python scripts/train.py \
+  --architecture roi_moe \
+  --hidden-dim 128 \
+  --num-experts 5 \
+  --roi-top-k 1 \
+  --attention-k 2 \
+  --segmentation-top-k 3 \
+  --num-attn-heads 4
+```
+
+`--hidden` is also accepted as an alias for `--hidden-dim`, and
+`--num-attention-heads` is an alias for `--num-attn-heads`. Hidden dimension
+defaults remain 256 for the `image` architecture and 128 for `roi_moe`.
+
 ```python
 from src.models import SparseROIAttributeModel
 

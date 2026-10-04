@@ -104,6 +104,46 @@ def parse_args() -> argparse.Namespace:
         default="none",
         help="Proposal generator when --architecture=roi_moe.",
     )
+    parser.add_argument(
+        "--hidden-dim",
+        "--hidden",
+        dest="hidden_dim",
+        type=int,
+        default=None,
+        help="Model hidden dimension (defaults to 256 for image and 128 for roi_moe).",
+    )
+    parser.add_argument(
+        "--num-experts",
+        type=int,
+        default=5,
+        help="Number of ROI experts for --architecture=roi_moe.",
+    )
+    parser.add_argument(
+        "--roi-top-k",
+        type=int,
+        default=1,
+        help="Number of ROI experts selected per ROI.",
+    )
+    parser.add_argument(
+        "--attention-k",
+        type=int,
+        default=2,
+        help="Number of learned ROI attention queries.",
+    )
+    parser.add_argument(
+        "--segmentation-top-k",
+        type=int,
+        default=3,
+        help="Number of segmentation experts selected per image.",
+    )
+    parser.add_argument(
+        "--num-attn-heads",
+        "--num-attention-heads",
+        dest="num_attn_heads",
+        type=int,
+        default=4,
+        help="Number of attention heads for --architecture=roi_moe.",
+    )
     
     # Training
     parser.add_argument(
@@ -268,6 +308,21 @@ def validate_args(args):
     if args.finetune_backbone and args.backbone != "dinov3":
         raise SystemExit("--finetune-backbone requires --backbone=dinov3")
 
+    if args.hidden_dim is not None and args.hidden_dim < 1:
+        raise SystemExit("--hidden-dim must be at least 1")
+
+    if args.architecture == "roi_moe":
+        if args.num_experts < 1:
+            raise SystemExit("--num-experts must be at least 1")
+        if not 1 <= args.roi_top_k <= args.num_experts:
+            raise SystemExit("--roi-top-k must be between 1 and --num-experts")
+        if args.attention_k < 1:
+            raise SystemExit("--attention-k must be at least 1")
+        if not 1 <= args.segmentation_top_k <= 5:
+            raise SystemExit("--segmentation-top-k must be between 1 and 5")
+        if args.num_attn_heads < 1:
+            raise SystemExit("--num-attn-heads must be at least 1")
+
 
 def main():
     args = parse_args()
@@ -332,16 +387,19 @@ def main():
     if args.architecture == "image":
         model = ImageAttributeModel(
             num_classes=num_attributes,
-            hidden_dim=256,
+            hidden_dim=args.hidden_dim if args.hidden_dim is not None else 256,
             backbone_type=args.backbone,
             backbone_trainable=args.finetune_backbone,
         )
     else:
         model = SparseROIAttributeModel(
             num_classes=num_attributes,
-            hidden_dim=128,
-            num_experts=5,
-            attention_k=2,
+            hidden_dim=args.hidden_dim if args.hidden_dim is not None else 128,
+            num_experts=args.num_experts,
+            roi_top_k=args.roi_top_k,
+            attention_k=args.attention_k,
+            segmentation_top_k=args.segmentation_top_k,
+            num_attention_heads=args.num_attn_heads,
             prompts=PROMPTS if args.roi_generator != "none" else (),
             roi_generator=args.roi_generator,
             image_backbone_type=args.backbone,
