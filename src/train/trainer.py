@@ -212,67 +212,113 @@ class Trainer:
                 )
             else:
                 logits = self.model(images_aug)
+
+            if not torch.isfinite(logits).all():
+                log.error(
+                    "Non-finite logits at epoch %d batch %d (global step %d). "
+                    "logits=%s images_aug=%s images_no_aug=%s images_detector=%s labels=%s",
+                    epoch,
+                    batch_idx,
+                    self.global_step + 1,
+                    self._tensor_health(logits),
+                    self._tensor_health(images_aug),
+                    self._tensor_health(images_no_aug),
+                    (
+                        self._tensor_health(images_detector)
+                        if images_detector is not None
+                        else None
+                    ),
+                    self._tensor_health(labels),
+                )
+                raise FloatingPointError(
+                    f"Non-finite model logits at epoch {epoch}, batch {batch_idx}"
+                )
+
             loss = self.criterion(logits, labels)
+            if not torch.isfinite(loss):
+                log.error(
+                    "Non-finite loss at epoch %d batch %d (global step %d). "
+                    "loss=%s logits=%s labels=%s",
+                    epoch,
+                    batch_idx,
+                    self.global_step + 1,
+                    self._tensor_health(loss),
+                    self._tensor_health(logits),
+                    self._tensor_health(labels),
+                )
+                raise FloatingPointError(
+                    f"Non-finite loss at epoch {epoch}, batch {batch_idx}"
+                )
 
             loss.backward()
             should_log_gradients = batch_idx % self.logging_steps == 0
-            loss_is_finite = bool(torch.isfinite(loss.detach()).item())
-            if should_log_gradients or not loss_is_finite:
-                gradient_metrics, nonfinite_gradients = self._gradient_diagnostics()
-                if nonfinite_gradients:
-                    log.error(
-                        "Non-finite gradients at epoch %d batch %d (global step %d): %s",
-                        epoch,
-                        batch_idx,
-                        self.global_step + 1,
-                        ", ".join(nonfinite_gradients),
-                    )
-                elif not loss_is_finite:
-                    log.error(
-                        "Non-finite loss at epoch %d batch %d (global step %d); "
-                        "gradients are finite.",
-                        epoch,
-                        batch_idx,
-                        self.global_step + 1,
-                    )
+            nonfinite_gradient_names = self._nonfinite_gradient_names()
+            if nonfinite_gradient_names:
+                gradient_metrics, _ = self._gradient_diagnostics()
+                log.error(
+                    "Non-finite gradients at epoch %d batch %d (global step %d); "
+                    "optimizer step skipped. Non-finite parameters (%d): %s; "
+                    "global_norm=%s",
+                    epoch,
+                    batch_idx,
+                    self.global_step + 1,
+                    len(nonfinite_gradient_names),
+                    ", ".join(nonfinite_gradient_names[:20]),
+                    gradient_metrics["grad_norm"],
+                )
+                log_wandb(
+                    self.wandb_run,
+                    {
+                        **gradient_metrics,
+                        "train_batch_loss": float(loss.detach().item()),
+                        "global_step": self.global_step + 1,
+                        "epoch": epoch,
+                        "batch": batch_idx,
+                    },
+                )
+                self.optimizer.zero_grad(set_to_none=True)
+                raise FloatingPointError(
+                    f"Non-finite gradients at epoch {epoch}, batch {batch_idx}; "
+                    "optimizer step was skipped"
+                )
 
-                if should_log_gradients:
-                    log.info(
-                        "Gradient diagnostics | epoch %d | batch %d/%d | "
-                        "global_step %d | global_norm %.6g | gradients %d/%d | "
-                        "missing %d | nonfinite %d | per_module_norm %s | "
-                        "missing_by_module %s",
-                        epoch,
-                        batch_idx,
-                        len(self.train_loader),
-                        self.global_step + 1,
-                        gradient_metrics["grad_norm"],
-                        int(gradient_metrics["grad_parameter_count"]),
-                        int(gradient_metrics["grad_trainable_parameter_count"]),
-                        int(gradient_metrics["grad_missing_parameter_count"]),
-                        int(gradient_metrics["grad_nonfinite_count"]),
-                        {
-                            name.removeprefix("grad_norm/"): value
-                            for name, value in gradient_metrics.items()
-                            if name.startswith("grad_norm/")
-                        },
-                        {
-                            name.removeprefix("grad_missing/"): value
-                            for name, value in gradient_metrics.items()
-                            if name.startswith("grad_missing/")
-                        },
-                    )
-                if should_log_gradients or not loss_is_finite:
-                    log_wandb(
-                        self.wandb_run,
-                        {
-                            **gradient_metrics,
-                            "train_batch_loss": float(loss.detach().item()),
-                            "global_step": self.global_step + 1,
-                            "epoch": epoch,
-                            "batch": batch_idx,
-                        },
-                    )
+            if should_log_gradients:
+                gradient_metrics, _ = self._gradient_diagnostics()
+                log.info(
+                    "Gradient diagnostics | epoch %d | batch %d/%d | "
+                    "global_step %d | global_norm %.6g | gradients %d/%d | "
+                    "missing %d | nonfinite %d | per_module_norm %s | "
+                    "missing_by_module %s",
+                    epoch,
+                    batch_idx,
+                    len(self.train_loader),
+                    self.global_step + 1,
+                    gradient_metrics["grad_norm"],
+                    int(gradient_metrics["grad_parameter_count"]),
+                    int(gradient_metrics["grad_trainable_parameter_count"]),
+                    int(gradient_metrics["grad_missing_parameter_count"]),
+                    int(gradient_metrics["grad_nonfinite_count"]),
+                    {
+                        name.removeprefix("grad_norm/"): value
+                        for name, value in gradient_metrics.items()
+                        if name.startswith("grad_norm/")
+                    },
+                    {
+                        name.removeprefix("grad_missing/"): value
+                        for name, value in gradient_metrics.items()
+                        if name.startswith("grad_missing/")
+                    },
+                )
+                log_wandb(
+                    self.wandb_run,
+                    {
+                        **gradient_metrics,
+                        "train_batch_loss": float(loss.detach().item()),
+                        "global_step": self.global_step + 1,
+                        "epoch": epoch,
+                        "batch": batch_idx,
+                    },
+                )
 
             self.optimizer.step()
 
@@ -297,6 +343,47 @@ class Trainer:
         if not self.train_loader:
             raise ValueError("Training data loader is empty.")
         return total_loss / len(self.train_loader)
+
+    def _nonfinite_gradient_names(self) -> list[str]:
+        gradient_tensors = [
+            (name, parameter.grad)
+            for name, parameter in self.model.named_parameters()
+            if parameter.requires_grad and parameter.grad is not None
+        ]
+        if not gradient_tensors:
+            return []
+
+        finite_flags = torch.stack(
+            [
+                torch.isfinite(gradient).all()
+                for _, gradient in gradient_tensors
+            ]
+        )
+        if finite_flags.all().item():
+            return []
+        return [
+            name
+            for (name, _), is_finite in zip(gradient_tensors, finite_flags)
+            if not is_finite.item()
+        ]
+
+    @staticmethod
+    def _tensor_health(tensor: torch.Tensor) -> dict[str, str | float | int]:
+        detached = tensor.detach()
+        finite = torch.isfinite(detached)
+        finite_values = detached[finite]
+        return {
+            "shape": str(tuple(detached.shape)),
+            "finite": int(finite.sum().item()),
+            "nan": int(torch.isnan(detached).sum().item()),
+            "inf": int(torch.isinf(detached).sum().item()),
+            "finite_min": (
+                float(finite_values.min().item()) if finite_values.numel() else float("nan")
+            ),
+            "finite_max": (
+                float(finite_values.max().item()) if finite_values.numel() else float("nan")
+            ),
+        }
 
     def _gradient_diagnostics(self) -> tuple[dict[str, float], list[str]]:
         """Summarize gradient norms by model component and identify non-finite gradients."""
