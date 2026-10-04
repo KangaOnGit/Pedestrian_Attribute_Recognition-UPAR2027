@@ -47,7 +47,7 @@ class SparseROIAttributeModel(nn.Module):
         in_channels: int = 3,
         roi_top_k: int = 1,
         
-        segmentation_top_k: int = 1,
+        segmentation_top_k: int = 3,
         num_attention_heads: int = 4,
         
         roi_size: tuple[int, int] = (96, 48),
@@ -198,7 +198,9 @@ class SparseROIAttributeModel(nn.Module):
         """
         if images.ndim != 4:
             raise ValueError("images must have shape [B, C, H, W]")
+        
         batch_size, channels, image_height, image_width = images.shape
+        
         if batch_size < 1 or channels < 1 or image_height < 1 or image_width < 1:
             raise ValueError("images must have non-empty batch, channel, and spatial dimensions")
         if channels != self.in_channels:
@@ -209,6 +211,7 @@ class SparseROIAttributeModel(nn.Module):
         if roi_boxes is None:
             roi_boxes = images.new_empty((batch_size, 0, 4))
         roi_boxes = torch.as_tensor(roi_boxes, device=images.device, dtype=images.dtype)
+        
         if roi_boxes.ndim != 3 or roi_boxes.shape[0] != batch_size or roi_boxes.shape[-1] != 4:
             raise ValueError("roi_boxes must have shape [B, R, 4]")
         if not torch.isfinite(roi_boxes).all():
@@ -338,6 +341,11 @@ class SparseROIAttributeModel(nn.Module):
                 batch_indices,
                 torch.ones_like(selected_weights[routed, expert_index]),
             )
+            expert_weights = selected_weights.new_zeros((batch_size,)).index_add(
+                0,
+                batch_indices,
+                selected_weights[routed, expert_index],
+            )
             expert_features = roi_features.new_zeros((batch_size, self.hidden_dim)).index_add(
                 0,
                 batch_indices,
@@ -345,7 +353,7 @@ class SparseROIAttributeModel(nn.Module):
             )
             per_expert_features.append(
                 expert_features
-                / expert_counts.clamp_min(1)[:, None]
+                / expert_weights.clamp_min(torch.finfo(expert_weights.dtype).tiny)[:, None]
             )
             expert_present[:, expert_index] = expert_counts > 0
         return torch.stack(per_expert_features, dim=1), expert_present

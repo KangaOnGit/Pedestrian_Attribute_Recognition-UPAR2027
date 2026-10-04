@@ -1,14 +1,16 @@
 # Pedestrian Attribute Recognition (UPAR2027)
 
-A PyTorch-based pedestrian attribute recognition pipeline for multi-label classification of human attributes such as age, gender, clothing color, accessories, and garment style. The project is built around a ResNet backbone and supports configurable training, optional augmentation, checkpointing, Weights & Biases logging, and Hugging Face uploads.
+A PyTorch-based pedestrian attribute recognition pipeline for multi-label classification of human attributes such as age, gender, clothing color, accessories, and garment style. The default training model uses pretrained DINOv3 global and regional image features with attribute-aware attention. A prompted ROI mixture-of-experts model is available as an alternate architecture.
 
 ## Overview
 
-This repository trains a multi-label classifier on CSV-annotated pedestrian images. Each sample is represented as an image path plus binary attribute labels. The training code builds a classification head on top of a pretrained torchvision ResNet model and optimizes it with a binary cross-entropy style loss function.
+This repository trains a multi-label classifier on CSV-annotated pedestrian images. Each sample is represented as an image path plus binary attribute labels. Training supports a pretrained DINOv3 encoder, an image-only convolutional baseline, and an optional prompted ROI mixture-of-experts model.
 
 The project includes:
 
-- ResNet18 / ResNet50 backbones from torchvision
+- Pretrained DINOv3 global and spatial-region features
+- Attribute-query cross-attention and label-interaction layers
+- Optional prompted ROI mixture-of-experts architecture
 - Multi-label attribute prediction using sigmoid outputs
 - Training and evaluation CSV support
 - Dataset subset selection for Market1501, PA100k, and PETA
@@ -111,8 +113,8 @@ Run training from the project root:
 python scripts/train.py \
   --train-csv data/annotations/train.csv \
   --val-csv data/annotations/val.csv \
-  --backbone resnet50 \
-  --pretrained \
+  --architecture image \
+  --backbone dinov3 \
   --batch-size 128 \
   --epochs 5 \
   --lr 3e-4 \
@@ -133,6 +135,8 @@ Some useful flags include:
 ```bash
 --dataset market
 --all-training-data
+--train-num-samples 2000
+--eval-num-samples 500
 --augment
 --wandb
 --wandb-project UPAR2027
@@ -141,6 +145,9 @@ Some useful flags include:
 --resume outputs/train/last_epoch.pt
 ```
 
+Training and validation use their full CSV splits by default. The sample-count
+flags above are optional limits for faster experiments.
+
 ## Configuration
 
 Training behavior is controlled by YAML files under `configs/`:
@@ -148,6 +155,9 @@ Training behavior is controlled by YAML files under `configs/`:
 - `configs/train.yaml`: learning rate, epochs, optimizer, batch size, loss, output directory, augmentation flags
 - `configs/eval.yaml`: validation sampling settings
 - `configs/miscs.yaml`: W&B project/entity defaults
+
+When using focal loss, per-attribute positive and class weights are calculated
+from the labels in the selected training set to account for label imbalance.
 
 The default training config currently sets:
 
@@ -197,9 +207,19 @@ Validation metrics are computed with a sigmoid threshold of 0.5. The code report
 
 This follows the multi-label classification evaluation flow in `src/metrics/run.py`.
 
-## Sparse ROI mixture-of-experts model
+## Model architectures
 
-`src.models.SparseROIAttributeModel` provides a separate model implementation for
+The default `image` architecture uses a pretrained DINOv3 image encoder. Its
+global feature and individual spatial patch features are presented to learned
+per-attribute queries. Those queries attend over visual tokens, then interact
+through a transformer encoder before producing attribute logits. This preserves
+global context while allowing each attribute to emphasize relevant image
+patches and model dependencies with other attributes.
+
+Use `--backbone conv` for a from-scratch baseline, or `--finetune-backbone` to
+fine-tune DINOv3 with a lower learning rate than the classification head.
+
+`--architecture roi_moe` selects `src.models.SparseROIAttributeModel` for
 prompted pedestrian ROIs and full-image context. It uses sparse top-k routing to
 send each ROI to only its selected ROI expert, attends over the per-expert
 features with `attention_k` learned queries, concatenates that feature with the

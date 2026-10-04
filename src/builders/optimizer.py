@@ -23,9 +23,27 @@ def build_optimizer(
     Returns:
         Optimizer of choice from optim_name
     """
+    backbone_parameters = [
+        parameter
+        for name, parameter in model.named_parameters()
+        if parameter.requires_grad
+        and name.startswith(("backbone.model.", "image_backbone.model."))
+    ]
+    backbone_parameter_ids = {id(parameter) for parameter in backbone_parameters}
+    head_parameters = [
+        parameter
+        for parameter in model.parameters()
+        if parameter.requires_grad and id(parameter) not in backbone_parameter_ids
+    ]
+    parameter_groups = [{"params": head_parameters, "lr": lr}]
+    if backbone_parameters:
+        parameter_groups.append(
+            {"params": backbone_parameters, "lr": lr * 0.01}
+        )
+
     if optim_name == "adamw":
         return AdamW(
-            model.parameters(),
+            parameter_groups,
             lr=lr,
             weight_decay=weight_decay,
             betas=tuple(CONFIG["optim"][optim_name]["beta"]),
@@ -33,7 +51,7 @@ def build_optimizer(
 
     if optim_name == "sgd":
         return SGD(
-            model.parameters(),
+            parameter_groups,
             lr=lr,
             weight_decay=weight_decay,
             momentum=CONFIG["optim"][optim_name]["momentum"]

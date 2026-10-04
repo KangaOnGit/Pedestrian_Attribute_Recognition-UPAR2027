@@ -97,7 +97,16 @@ class Trainer:
         )
 
         self.model.to(self.device)
-        self.criterion: nn.Module = build_loss(loss_name)
+        target_tensor = None
+        if loss_name == "focal":
+            training_targets = getattr(train_loader.dataset, "labels", None)
+            if training_targets is None:
+                raise ValueError(
+                    "Focal loss requires the training dataset to expose its labels "
+                    "for per-attribute class balancing."
+                )
+            target_tensor = torch.as_tensor(training_targets, dtype=torch.float32)
+        self.criterion: nn.Module = build_loss(loss_name, target_tensor)
 
         # -------- Loss, Optim, Scheduler -------------
         self.criterion.to(self.device)

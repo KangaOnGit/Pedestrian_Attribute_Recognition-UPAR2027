@@ -18,13 +18,13 @@ from src.utils.seed import set_seed
 from src.utils.wb import init_wandb
 from src.utils.config import resolve_path
 
+from src.models.feature_encoder import ImageAttributeModel
 from src.models.roi_moe import SparseROIAttributeModel
 
 
 TRAIN_CONFIG = load_config("configs/train.yaml")
 HYPER_PARAM = TRAIN_CONFIG["hyper_param"]
 
-EVAL_CONFIG = load_config("configs/eval.yaml")
 MISC_CONFIG = load_config("configs/miscs.yaml")
 
 DEFAULT_DATASET = TRAIN_CONFIG["data"].get("data_name")
@@ -64,14 +64,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--train-num-samples",
         type=int,
-        default=EVAL_CONFIG.get("num_samples"),
+        default=None,
         help="Number of training samples.",
     )
     
     parser.add_argument(
         "--eval-num-samples",
         type=int,
-        default=TRAIN_CONFIG["data"].get("num_samples"),
+        default=None,
         help="Number of samples to perform validation on.",
     )
 
@@ -82,17 +82,27 @@ def parse_args() -> argparse.Namespace:
     )
     
     parser.add_argument(
-        "--backbone",
-        choices=("siglip2"),
-        default="siglip2",
-        help="Backbone",
+        "--architecture",
+        choices=("image", "roi_moe"),
+        default="image",
+        help="Use the pretrained image baseline or the prompted ROI mixture-of-experts.",
     )
-    
     parser.add_argument(
-        "--pretrained",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Initialize backbone with ImageNet weights.",
+        "--backbone",
+        choices=("dinov3", "conv"),
+        default="dinov3",
+        help="Image feature encoder. DINOv3 is pretrained; conv is trained from scratch.",
+    )
+    parser.add_argument(
+        "--finetune-backbone",
+        action="store_true",
+        help="Fine-tune DINOv3 instead of keeping its pretrained weights frozen.",
+    )
+    parser.add_argument(
+        "--roi-generator",
+        choices=("none", "sam3", "yoloe"),
+        default="none",
+        help="Proposal generator when --architecture=roi_moe.",
     )
     
     # Training
@@ -252,6 +262,12 @@ def validate_args(args):
     if args.weight_decay < 0:
         raise SystemExit("--weight-decay cannot be negative")
 
+    if args.architecture == "image" and args.roi_generator != "none":
+        raise SystemExit("--roi-generator can only be used with --architecture=roi_moe")
+
+    if args.finetune_backbone and args.backbone != "dinov3":
+        raise SystemExit("--finetune-backbone requires --backbone=dinov3")
+
 
 def main():
     args = parse_args()
@@ -313,13 +329,24 @@ def main():
 
     # Model
     log.info("Loading model...")
-    model = SparseROIAttributeModel(
-        num_classes = 40,
-        hidden_dim = 128,
-        num_experts = 5,
-        attention_k = 2,
-        prompts = PROMPTS,
-    )
+    if args.architecture == "image":
+        model = ImageAttributeModel(
+            num_classes=num_attributes,
+            hidden_dim=256,
+            backbone_type=args.backbone,
+            backbone_trainable=args.finetune_backbone,
+        )
+    else:
+        model = SparseROIAttributeModel(
+            num_classes=num_attributes,
+            hidden_dim=128,
+            num_experts=5,
+            attention_k=2,
+            prompts=PROMPTS if args.roi_generator != "none" else (),
+            roi_generator=args.roi_generator,
+            image_backbone_type=args.backbone,
+            dinov3_trainable=args.finetune_backbone,
+        )
 
     # W&B
     wandb_run = None

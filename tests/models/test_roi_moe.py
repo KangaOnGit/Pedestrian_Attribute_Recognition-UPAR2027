@@ -93,6 +93,19 @@ class SparseROIAttributeModelTests(unittest.TestCase):
             0,
         )
 
+    def test_roi_features_are_not_attenuated_by_router_probability(self) -> None:
+        model = self.build_model()
+        rois = torch.randn(1, 3, 16, 8)
+        valid = torch.ones(1, 1, dtype=torch.bool)
+        routing_logits = torch.tensor([[8.0, 0.0, 0.0]])
+
+        with patch.object(model.roi_router, "forward", return_value=routing_logits):
+            features, present = model._encode_rois(rois, valid, batch_size=1)
+
+        expected = model.roi_expert_projection[0](model.roi_experts[0](rois))
+        torch.testing.assert_close(features[0, 0], expected[0])
+        self.assertTrue(present[0, 0])
+
     def test_sam3_is_initialized_and_generates_prompt_boxes(self) -> None:
         processor = FakeSam3Processor()
         with (
@@ -181,8 +194,10 @@ class SparseROIAttributeModelTests(unittest.TestCase):
                 self,
                 images: list[object],
                 return_tensors: str,
+                do_rescale: bool,
             ) -> FakeBatch:
                 assert return_tensors == "pt"
+                assert not do_rescale
                 return FakeBatch({"pixel_values": torch.ones(len(images), 3, 32, 32)})
 
         with (
