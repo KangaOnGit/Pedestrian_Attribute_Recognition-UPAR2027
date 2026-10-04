@@ -6,11 +6,11 @@ from collections.abc import Sequence
 from typing import Literal
 
 import torch
-from PIL import Image
 from torch import Tensor, nn
 from torch.nn import functional as F
 from src.models.roi_generator import Sam3PromptBoxGenerator, YOLOEPromptBoxGenerator
 from src.models.feature_encoder import DINOv3FeatureEncoder, ConvFeatureEncoder
+from jaxtyping import Float
 
 class ROIExpert(nn.Module):
     """Processes the ROIs routed to one expert."""
@@ -56,7 +56,7 @@ class SparseROIAttributeModel(nn.Module):
         sam3_model_id: str = "facebook/sam3",
         sam3_score_threshold: float = 0.5,
         yoloe_model_id: str = "yoloe-11s-seg.pt",
-        yoloe_score_threshold: float = 0.5,
+        yoloe_score_threshold: float = 0.3,
         
         image_backbone_type: Literal["conv", "dinov3"] = "conv",
         dinov3_model_id: str = "facebook/dinov3-vits16-pretrain-lvd1689m",
@@ -120,7 +120,7 @@ class SparseROIAttributeModel(nn.Module):
             )
         )
 
-        self.num_classes = num_classes
+        self.num_classes: int = num_classes
         self.image_backbone = (
             image_backbone
             if image_backbone is not None
@@ -170,7 +170,7 @@ class SparseROIAttributeModel(nn.Module):
             num_attention_heads,
             batch_first=True,
         )
-        self.attention_k = attention_k
+        self.attention_k: int = attention_k
 
         fused_dim = hidden_dim * (attention_k + 1)
         self.segmentation_router = nn.Sequential(
@@ -190,16 +190,19 @@ class SparseROIAttributeModel(nn.Module):
             ]
         )
 
-    def forward(self, images: Tensor, roi_boxes: Tensor | None = None) -> Tensor:
+    def forward(self,
+                images_aug: Float[torch.Tensor, "B 3 H W"],
+                images_no_aug: Float[torch.Tensor, "B 3 H W"],
+                roi_boxes: Tensor | None = None) -> Tensor:
         """Return multi-label class logits shaped ``[B, num_classes]``.
 
         ``roi_boxes`` uses pixel-coordinate ``(x1, y1, x2, y2)`` values and
         may include zero-area boxes as padding; these are ignored.
         """
-        if images.ndim != 4:
+        if images_aug.ndim != 4:
             raise ValueError("images must have shape [B, C, H, W]")
         
-        batch_size, channels, image_height, image_width = images.shape
+        batch_size, channels, image_height, image_width = images_aug.shape
         
         if batch_size < 1 or channels < 1 or image_height < 1 or image_width < 1:
             raise ValueError("images must have non-empty batch, channel, and spatial dimensions")
@@ -207,17 +210,17 @@ class SparseROIAttributeModel(nn.Module):
             raise ValueError(f"images must have {self.in_channels} channels")
 
         if roi_boxes is None and self.roi_proposal_generator is not None:
-            roi_boxes = self.roi_proposal_generator(images, self.prompts)
+            roi_boxes = self.roi_proposal_generator(images_no_aug, self.prompts)
         if roi_boxes is None:
-            roi_boxes = images.new_empty((batch_size, 0, 4))
-        roi_boxes = torch.as_tensor(roi_boxes, device=images.device, dtype=images.dtype)
+            roi_boxes = images_aug.new_empty((batch_size, 0, 4))
+        roi_boxes = torch.as_tensor(roi_boxes, device=images_aug.device, dtype=images_aug.dtype)
         
         if roi_boxes.ndim != 3 or roi_boxes.shape[0] != batch_size or roi_boxes.shape[-1] != 4:
             raise ValueError("roi_boxes must have shape [B, R, 4]")
         if not torch.isfinite(roi_boxes).all():
             raise ValueError("roi_boxes must contain only finite coordinates")
 
-        roi_crops, roi_valid = self._crop_rois(images, roi_boxes)
+        roi_crops, roi_valid = self._crop_rois(images_aug, roi_boxes)
         roi_features, expert_present = self._encode_rois(roi_crops, roi_valid, batch_size)
 
         safe_padding_mask = ~expert_present
@@ -235,7 +238,10 @@ class SparseROIAttributeModel(nn.Module):
         attended = attended * expert_present.any(dim=1)[:, None, None]
         roi_branch = attended.reshape(batch_size, self.attention_k * self.hidden_dim)
 
-        image_features = self.image_backbone(images)
+        if isinstance(self.image_backbone, DINOv3FeatureEncoder):
+            image_features = self.image_backbone(images_no_aug)
+        else:
+            image_features = self.image_backbone(images_aug)
         self._validate_encoder_output(
             image_features,
             batch_size,

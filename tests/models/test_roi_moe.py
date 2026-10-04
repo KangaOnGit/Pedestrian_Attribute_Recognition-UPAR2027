@@ -55,7 +55,17 @@ class FakeSam3Processor:
         assert threshold == 0.5
         assert mask_threshold == 0.5
         assert target_sizes == [[48, 24]]
-        return [{"boxes": torch.tensor([[1.0, 2.0, 20.0, 40.0]])}]
+        return [
+            {
+                "boxes": torch.tensor(
+                    [
+                        [1.0, 2.0, 20.0, 40.0],
+                        [5.0, 6.0, 22.0, 42.0],
+                    ]
+                ),
+                "scores": torch.tensor([0.4, 0.9]),
+            }
+        ]
 
 
 class SparseROIAttributeModelTests(unittest.TestCase):
@@ -117,12 +127,21 @@ class SparseROIAttributeModelTests(unittest.TestCase):
                 roi_generator="sam3",
                 sam3_model_id="test/sam3",
             )
-            logits = model(torch.randn(2, 3, 48, 24))
+            images = torch.randn(2, 3, 48, 24)
+            generator = model.roi_proposal_generator
+            assert generator is not None
+            generated_boxes = generator(images, model.prompts)
+            logits = model(images, images)
 
         self.assertEqual(tuple(logits.shape), (2, 7))
+        self.assertEqual(tuple(generated_boxes.shape), (2, 2, 4))
+        torch.testing.assert_close(
+            generated_boxes,
+            torch.tensor([[[5.0, 6.0, 22.0, 42.0]] * 2] * 2),
+        )
         load_model.assert_called_once_with("test/sam3")
         load_processor.assert_called_once_with("test/sam3")
-        self.assertEqual(processor.seen_prompts, ["person", "backpack"] * 2)
+        self.assertEqual(processor.seen_prompts, ["person", "backpack"] * 4)
 
     def test_yoloe_batches_images_and_generates_prompt_boxes(self) -> None:
         class FakeYOLOE:
@@ -138,13 +157,40 @@ class SparseROIAttributeModelTests(unittest.TestCase):
                 self.prediction_calls.append(kwargs)
                 source = kwargs["source"]
                 assert isinstance(source, torch.Tensor)
+                prompt_index = (len(self.prediction_calls) - 1) % 2
+                if prompt_index == 0:
+                    return [
+                        SimpleNamespace(
+                            boxes=SimpleNamespace(
+                                xyxy=torch.tensor(
+                                    [
+                                        [1.0, 2.0, 20.0, 40.0],
+                                        [3.0, 4.0, 30.0, 44.0],
+                                    ]
+                                ),
+                                conf=torch.tensor([0.4, 0.9]),
+                            )
+                        ),
+                        SimpleNamespace(boxes=None),
+                    ]
                 return [
                     SimpleNamespace(
                         boxes=SimpleNamespace(
-                            xyxy=torch.tensor([[1.0, 2.0, 20.0, 40.0]])
+                            xyxy=torch.tensor([[5.0, 6.0, 35.0, 46.0]]),
+                            conf=torch.tensor([0.75]),
                         )
                     ),
-                    SimpleNamespace(boxes=None),
+                    SimpleNamespace(
+                        boxes=SimpleNamespace(
+                            xyxy=torch.tensor(
+                                [
+                                    [7.0, 8.0, 37.0, 47.0],
+                                    [8.0, 9.0, 38.0, 49.0],
+                                ]
+                            ),
+                            conf=torch.tensor([0.3, 0.8]),
+                        )
+                    ),
                 ]
 
         fake_module = SimpleNamespace(YOLOE=FakeYOLOE)
@@ -153,16 +199,31 @@ class SparseROIAttributeModelTests(unittest.TestCase):
                 prompts=("person", "backpack"),
                 roi_generator="yoloe",
                 yoloe_model_id="test/yoloe",
+                yoloe_score_threshold=0.5,
             )
             images = torch.zeros(2, 3, 48, 24)
-            logits = model(images)
-            model(images)
+            generator = model.roi_proposal_generator
+            assert generator is not None
+            generated_boxes = generator(images, model.prompts)
+            logits = model(images, images)
 
-        generator = model.roi_proposal_generator
         self.assertEqual(tuple(logits.shape), (2, 7))
         self.assertEqual(generator.model.model_id, "test/yoloe")
-        self.assertEqual(generator.model.prompt_calls, [["person", "backpack"]])
-        self.assertEqual(len(generator.model.prediction_calls), 2)
+        self.assertEqual(
+            generator.model.prompt_calls,
+            [["person"], ["backpack"], ["person"], ["backpack"]],
+        )
+        self.assertEqual(len(generator.model.prediction_calls), 4)
+        self.assertEqual(tuple(generated_boxes.shape), (2, 2, 4))
+        torch.testing.assert_close(
+            generated_boxes,
+            torch.tensor(
+                [
+                    [[3.0, 4.0, 30.0, 44.0], [5.0, 6.0, 35.0, 46.0]],
+                    [[0.0, 0.0, 0.0, 0.0], [8.0, 9.0, 38.0, 49.0]],
+                ]
+            ),
+        )
         first_call = generator.model.prediction_calls[0]
         self.assertEqual(first_call["conf"], 0.5)
         self.assertEqual(first_call["device"], "cpu")
@@ -172,7 +233,7 @@ class SparseROIAttributeModelTests(unittest.TestCase):
         self.assertEqual(tuple(source.shape), (2, 3, 48, 24))
         torch.testing.assert_close(
             source[0, :, 0, 0],
-            torch.tensor([0.485, 0.456, 0.406]),
+            torch.zeros(3),
         )
 
     def test_dinov3_can_be_used_as_full_image_backbone(self) -> None:

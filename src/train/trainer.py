@@ -189,14 +189,16 @@ class Trainer:
 
         total_loss: float = 0.0
 
-        for batch_idx, (images_aug, _, labels) in enumerate(self.train_loader, start=1):
+        for batch_idx, (images_aug, images_no_aug, labels) in enumerate(self.train_loader, start=1):
 
             images_aug: Float[torch.Tensor, "B C H W"] = images_aug.to(self.device)
+            images_no_aug: Float[torch.Tensor, "B C H W"] = images_no_aug.to(self.device)
             labels: Float[torch.Tensor, "B K"] = labels.to(self.device)
             
             self.optimizer.zero_grad()
 
-            logits: Float[torch.Tensor, "B K"] = self.model(images_aug)
+            logits: Float[torch.Tensor, "B K"] = self.model(images_aug,
+                                                            images_no_aug)
             loss = self.criterion(logits, labels)
 
             loss.backward()
@@ -234,12 +236,14 @@ class Trainer:
         all_predictions: list[torch.Tensor] = []
         all_labels: list[torch.Tensor] = []
 
-        for images_aug, _, labels in self.eval_loader:
+        for images_aug, images_no_aug, labels in self.eval_loader:
             
             images_aug: Float[torch.Tensor, "B C H W"] = images_aug.to(self.device)
+            images_no_aug: Float[torch.Tensor, "B C H W"] = images_no_aug.to(self.device)
             labels: Float[torch.Tensor, "B K"] = labels.to(self.device)
 
-            logits: Float[torch.Tensor, "B K"] = self.model(images_aug)
+            logits: Float[torch.Tensor, "B K"] = self.model(images_aug,
+                                                            images_no_aug,)
 
             loss = self.criterion(logits, labels)
             val_loss += loss.item()
