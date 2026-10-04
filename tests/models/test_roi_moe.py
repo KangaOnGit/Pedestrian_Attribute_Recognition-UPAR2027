@@ -60,6 +60,7 @@ class FakeSam3Processor:
 
 class SparseROIAttributeModelTests(unittest.TestCase):
     def build_model(self, **kwargs: object) -> SparseROIAttributeModel:
+        kwargs.setdefault("roi_generator", "none")
         return SparseROIAttributeModel(
             num_classes=7,
             hidden_dim=16,
@@ -109,6 +110,57 @@ class SparseROIAttributeModelTests(unittest.TestCase):
         load_model.assert_called_once_with("test/sam3")
         load_processor.assert_called_once_with("test/sam3")
         self.assertEqual(processor.seen_prompts, ["person", "backpack"] * 2)
+
+    def test_yoloe_batches_images_and_generates_prompt_boxes(self) -> None:
+        class FakeYOLOE:
+            def __init__(self, model_id: str) -> None:
+                self.model_id = model_id
+                self.prompt_calls: list[list[str]] = []
+                self.prediction_calls: list[dict[str, object]] = []
+
+            def set_classes(self, prompts: list[str]) -> None:
+                self.prompt_calls.append(prompts)
+
+            def predict(self, **kwargs: object) -> list[object]:
+                self.prediction_calls.append(kwargs)
+                source = kwargs["source"]
+                assert isinstance(source, torch.Tensor)
+                return [
+                    SimpleNamespace(
+                        boxes=SimpleNamespace(
+                            xyxy=torch.tensor([[1.0, 2.0, 20.0, 40.0]])
+                        )
+                    ),
+                    SimpleNamespace(boxes=None),
+                ]
+
+        fake_module = SimpleNamespace(YOLOE=FakeYOLOE)
+        with patch.dict("sys.modules", {"ultralytics": fake_module}):
+            model = self.build_model(
+                prompts=("person", "backpack"),
+                roi_generator="yoloe",
+                yoloe_model_id="test/yoloe",
+            )
+            images = torch.zeros(2, 3, 48, 24)
+            logits = model(images)
+            model(images)
+
+        generator = model.roi_proposal_generator
+        self.assertEqual(tuple(logits.shape), (2, 7))
+        self.assertEqual(generator.model.model_id, "test/yoloe")
+        self.assertEqual(generator.model.prompt_calls, [["person", "backpack"]])
+        self.assertEqual(len(generator.model.prediction_calls), 2)
+        first_call = generator.model.prediction_calls[0]
+        self.assertEqual(first_call["conf"], 0.5)
+        self.assertEqual(first_call["device"], "cpu")
+        self.assertFalse(first_call["verbose"])
+        source = first_call["source"]
+        self.assertIsInstance(source, torch.Tensor)
+        self.assertEqual(tuple(source.shape), (2, 3, 48, 24))
+        torch.testing.assert_close(
+            source[0, :, 0, 0],
+            torch.tensor([0.485, 0.456, 0.406]),
+        )
 
     def test_dinov3_can_be_used_as_full_image_backbone(self) -> None:
         class FakeDINOv3(nn.Module):

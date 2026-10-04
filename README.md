@@ -216,11 +216,18 @@ model = SparseROIAttributeModel(
     hidden_dim=256,
     num_experts=4,
     attention_k=2,
-    roi_generator="sam3",
+    roi_generator="yoloe",
     prompts=("person", "backpack"),
 )
 logits = model(images)
 ```
+
+YOLO-E is the default prompt-based ROI generator. It applies the text prompts
+once and detects all images in each batch together, returning
+pixel-coordinate `(x1, y1, x2, y2)` boxes. Its default checkpoint is
+`yoloe-11s-seg.pt`; pass `yoloe_model_id` or `yoloe_score_threshold` to customize
+it. The first prompted run downloads the YOLO-E weights and its text encoder,
+so it requires network access.
 
 Setting `roi_generator="sam3"` loads the Hugging Face `facebook/sam3` model and
 processor during model construction; SAM 3 runs each configured text prompt and
@@ -228,8 +235,8 @@ returns pixel-coordinate `(x1, y1, x2, y2)` boxes. SAM 3 weights may require
 accepting the upstream model terms and authenticating with Hugging Face. Set
 `roi_generator="none"` to disable automatic proposals, or pass `roi_boxes`
 directly to `forward`; direct boxes take precedence over generated boxes.
-SAM 3 currently runs once per image and prompt, so larger batches or prompt lists
-increase proposal-generation time.
+SAM 3 remains available as an alternative but runs once per image and prompt,
+so larger batches or prompt lists increase proposal-generation time.
 
 DINOv3 is available as an optional full-image feature encoder, not as a
 text-prompted box detector:

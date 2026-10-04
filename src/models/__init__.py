@@ -3,6 +3,7 @@ from src.models.roi_moe import (
     DINOv3FeatureEncoder,
     Sam3PromptBoxGenerator,
     SparseROIAttributeModel,
+    YOLOEPromptBoxGenerator,
 )
 
 __all__ = [
@@ -10,4 +11,5 @@ __all__ = [
     "DINOv3FeatureEncoder",
     "Sam3PromptBoxGenerator",
     "SparseROIAttributeModel",
+    "YOLOEPromptBoxGenerator",
 ]

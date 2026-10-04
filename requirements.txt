@@ -8,4 +8,5 @@ python-dotenv
 albumentations
 jaxtyping
 transformers>=4.50.0
+ultralytics>=8.3.100
 wandb

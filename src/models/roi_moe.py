@@ -9,7 +9,7 @@ import torch
 from PIL import Image
 from torch import Tensor, nn
 from torch.nn import functional as F
-from src.models.roi_generator import Sam3PromptBoxGenerator
+from src.models.roi_generator import Sam3PromptBoxGenerator, YOLOEPromptBoxGenerator
 from src.models.feature_encoder import DINOv3FeatureEncoder, ConvFeatureEncoder
 
 class ROIExpert(nn.Module):
@@ -29,7 +29,7 @@ class ROIExpert(nn.Module):
 class SparseROIAttributeModel(nn.Module):
     """Combine sparse prompted-ROI experts and a full-image path.
 
-    ``roi_generator="sam3"`` loads SAM 3 during construction and uses
+    ``roi_generator="yoloe"`` loads YOLO-E during construction and uses
     ``prompts`` to generate pixel-coordinate XYXY boxes. Boxes may also be
     passed directly to ``forward``.
     Custom encoders must accept image batches and return ``[N, hidden_dim]``.
@@ -52,9 +52,11 @@ class SparseROIAttributeModel(nn.Module):
         
         roi_size: tuple[int, int] = (96, 48),
         prompts: Sequence[str] = (),
-        roi_generator: Literal["none", "sam3"] = "sam3",
+        roi_generator: Literal["none", "sam3", "yoloe"] = "yoloe",
         sam3_model_id: str = "facebook/sam3",
         sam3_score_threshold: float = 0.5,
+        yoloe_model_id: str = "yoloe-11s-seg.pt",
+        yoloe_score_threshold: float = 0.5,
         
         image_backbone_type: Literal["conv", "dinov3"] = "conv",
         dinov3_model_id: str = "facebook/dinov3-vits16-pretrain-lvd1689m",
@@ -77,18 +79,20 @@ class SparseROIAttributeModel(nn.Module):
             raise ValueError("hidden_dim must be divisible by num_attention_heads")
         if in_channels < 1 or len(roi_size) != 2 or min(roi_size) < 1:
             raise ValueError("in_channels and both roi_size dimensions must be positive")
-        if roi_generator not in ("none", "sam3"):
-            raise ValueError("roi_generator must be 'none' or 'sam3'")
-        if roi_generator == "sam3" and not prompts:
-            raise ValueError("prompts must be provided when roi_generator='sam3'")
+        if roi_generator not in ("none", "sam3", "yoloe"):
+            raise ValueError("roi_generator must be 'none', 'sam3', or 'yoloe'")
+        if roi_generator != "none" and not prompts:
+            raise ValueError(f"prompts must be provided when roi_generator={roi_generator!r}")
         if image_backbone_type not in ("conv", "dinov3"):
             raise ValueError("image_backbone_type must be 'conv' or 'dinov3'")
         if in_channels != 3 and (
-            roi_generator == "sam3" or image_backbone_type == "dinov3"
+            roi_generator != "none" or image_backbone_type == "dinov3"
         ):
-            raise ValueError("SAM 3 and DINOv3 require three-channel RGB inputs")
+            raise ValueError("ROI detectors and DINOv3 require three-channel RGB inputs")
         if not 0 <= sam3_score_threshold <= 1:
             raise ValueError("sam3_score_threshold must be between 0 and 1")
+        if not 0 <= yoloe_score_threshold <= 1:
+            raise ValueError("yoloe_score_threshold must be between 0 and 1")
         if roi_backbones is not None and len(roi_backbones) != num_experts:
             raise ValueError("roi_backbones must contain exactly num_experts encoders")
 
@@ -106,7 +110,14 @@ class SparseROIAttributeModel(nn.Module):
                 score_threshold=sam3_score_threshold,
             )
             if roi_generator == "sam3"
-            else None
+            else (
+                YOLOEPromptBoxGenerator(
+                    model_id=yoloe_model_id,
+                    score_threshold=yoloe_score_threshold,
+                )
+                if roi_generator == "yoloe"
+                else None
+            )
         )
 
         self.num_classes = num_classes
@@ -383,5 +394,6 @@ __all__ = [
     "ConvFeatureEncoder",
     "DINOv3FeatureEncoder",
     "Sam3PromptBoxGenerator",
+    "YOLOEPromptBoxGenerator",
     "SparseROIAttributeModel",
 ]
