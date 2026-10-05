@@ -7,11 +7,11 @@ num_samples: 20
 # Augmentation
 aug: True
 median: True
-horizontal_flip: True
+horizontal_flip: False
 random_resized_crop: False
-affine: True
+affine: False
 safe_rotate: False
-coarse_dropout: True
+coarse_dropout: False
 gaussian_blur: False
 color_jitter: False
 rgb_shift: False

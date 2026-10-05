@@ -179,15 +179,39 @@ class ConvFeatureEncoder(nn.Module):
                  hidden_dim: int) -> None:
         super().__init__()
         self.features = nn.Sequential(
-            nn.Conv2d(in_channels, 32, kernel_size=3, stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(32),
+            nn.Conv2d(
+                in_channels,
+                32,
+                kernel_size=3,
+                stride=2,
+                padding=1,
+                bias=False,
+            ),
+            nn.GroupNorm(8, 32),
             nn.GELU(),
-            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(64),
+
+            nn.Conv2d(
+                32,
+                64,
+                kernel_size=3,
+                stride=2,
+                padding=1,
+                bias=False,
+            ),
+            nn.GroupNorm(8, 64),
             nn.GELU(),
-            nn.Conv2d(64, hidden_dim, kernel_size=3, stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(hidden_dim),
+
+            nn.Conv2d(
+                64,
+                hidden_dim,
+                kernel_size=3,
+                stride=2,
+                padding=1,
+                bias=False,
+            ),
+            nn.GroupNorm(8, hidden_dim),
             nn.GELU(),
+
             nn.AdaptiveAvgPool2d(1),
             nn.Flatten(),
         )
