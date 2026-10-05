@@ -255,24 +255,24 @@ python scripts/train.py \
   --output-dir outputs/roi_moe
 ```
 
-Train and evaluate the UPAR model through the same trainer:
+Train the UPAR model with its dedicated training script:
 
 ```bash
-python scripts/train.py \
-  --architecture upar \
-  --train-csv data/annotations/train.csv \
-  --val-csv data/annotations/val.csv \
+python scripts/train_upar.py \
+  --data-root data \
   --batch-size 64 \
   --epochs 5 \
   --lr 0.0001 \
   --output-dir outputs/upar
 ```
 
-By default, UPAR initializes from `src/models/upar/weights/` and fine-tunes
-its adapter and attribute temperatures while keeping the CLIP vision tower
-frozen. The same trainer handles validation, metrics, and checkpoints. Use
-`--upar-weights-dir` to initialize from another directory containing
-`head.pt` and `clip_visual_fp16.pt`.
+UPAR reads `annotations/task1/train/gt.csv` and
+`annotations/task1/val/gt.csv` under the data root. By default, it initializes
+from `src/models/upar/weights/clip_visual_fp16.pt`, trains its adapter, soft
+prompts, attribute temperatures, and optional domain-adversarial head, while
+keeping the CLIP vision and text encoders frozen. Use `--weights-dir` to load
+vision weights from another directory, or `--image-roots` to add image search
+locations. Run `python scripts/train_upar.py --help` for UPAR-specific options.
 
 The ROI hyperparameters are configurable:
 
@@ -286,7 +286,7 @@ The ROI hyperparameters are configurable:
 `--hidden` aliases `--hidden-dim`. `--yoloe-prompt-mode` accepts `loop`
 (default) or `one-pass`; it applies only when `--roi-generator yoloe`. The
 default hidden dimensions are 256 for `image` and 128 for `roi_moe`. Run
-`python scripts/train.py --help` to see all options.
+`python scripts/train.py --help` to see image/ROI training options.
 
 Other useful options:
 

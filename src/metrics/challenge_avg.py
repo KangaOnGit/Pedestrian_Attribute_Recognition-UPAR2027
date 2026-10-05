@@ -17,7 +17,7 @@ def chal_avg(
     """
     
     mA: float = label_mean_acc(lb_cm)
-    i_F1: float = instance_metrics(i_cm).acc
+    i_F1: float = instance_metrics(i_cm).f1
     
     if (mA + i_F1 == 0):
         print(f"Division by 0")

@@ -20,8 +20,6 @@ from src.utils.config import resolve_path
 
 from src.models.feature_encoder import ImageAttributeModel
 from src.models.roi_moe import SparseROIAttributeModel
-from src.models.upar.attributes import ATTR_NAMES
-from src.models.upar.model import UPARAttributeModel
 
 
 TRAIN_CONFIG = load_config("configs/train.yaml")
@@ -87,20 +85,10 @@ def parse_args() -> argparse.Namespace:
     
     parser.add_argument(
         "--architecture",
-        choices=("image", "roi_moe", "upar"),
+        choices=("image", "roi_moe"),
         default="image",
         help=(
-            "Choose the image model, prompted ROI mixture-of-experts, or "
-            "the pretrained UPAR model."
-        ),
-    )
-    parser.add_argument(
-        "--upar-weights-dir",
-        type=Path,
-        default="src/models/upar/weights",
-        help=(
-            "UPAR initialization directory containing head.pt and "
-            "clip_visual_fp16.pt (defaults to src/models/upar/weights)."
+            "Choose the image model or prompted ROI mixture-of-experts."
         ),
     )
     parser.add_argument(
@@ -313,16 +301,8 @@ def validate_args(args):
     if args.architecture != "roi_moe" and args.roi_generator != "none":
         raise SystemExit("--roi-generator can only be used with --architecture=roi_moe")
 
-    if args.architecture != "upar" and args.upar_weights_dir is not None:
-        raise SystemExit("--upar-weights-dir can only be used with --architecture=upar")
-
     if args.finetune_backbone and args.backbone != "dinov3":
         raise SystemExit("--finetune-backbone requires --backbone=dinov3")
-
-    if args.architecture == "upar" and args.finetune_backbone:
-        raise SystemExit(
-            "The UPAR CLIP vision tower is frozen; --finetune-backbone does not apply."
-        )
 
     if args.hidden_dim is not None and args.hidden_dim < 1:
         raise SystemExit("--hidden-dim must be at least 1")
@@ -374,7 +354,6 @@ def main():
                           device,
                           height = args.height,
                           width = args.width)
-
     num_attributes = len(train_dataset.label_columns)
 
     log.info(
@@ -391,16 +370,6 @@ def main():
         "Number of attributes: %d",
         num_attributes,
     )
-    if args.architecture == "upar":
-        if tuple(train_dataset.label_columns) != tuple(ATTR_NAMES):
-            raise ValueError(
-                "UPAR training requires labels in the canonical 40-attribute order."
-            )
-        if tuple(eval_dataset.label_columns) != tuple(ATTR_NAMES):
-            raise ValueError(
-                "UPAR validation requires labels in the canonical 40-attribute order."
-            )
-
     # Model
     log.info("Loading model...")
     if args.architecture == "image":
@@ -422,20 +391,6 @@ def main():
             image_backbone_type=args.backbone,
             dinov3_trainable=args.finetune_backbone,
         )
-    else:
-        model = UPARAttributeModel(
-            weights_dir=(
-                resolve_path(args.upar_weights_dir)
-                if args.upar_weights_dir is not None
-                else None
-            ),
-        )
-        if (args.height, args.width) != (model.img_h, model.img_w):
-            raise ValueError(
-                f"UPAR weights require --height {model.img_h} and "
-                f"--width {model.img_w}."
-            )
-
     # W&B
     wandb_run = None
     if args.wandb:

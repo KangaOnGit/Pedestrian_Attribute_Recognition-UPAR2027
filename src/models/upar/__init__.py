@@ -1,6 +1,5 @@
-"""Gói suy luận UPAR 2027 Track 1 — được đóng gói trong file zip nộp bài. Chỉ phụ thuộc torch + numpy + Pillow."""
-from .model import UPARAttributeModel
+"""UPAR model components for training and inference."""
 
 __version__ = "1.0"
 
-__all__ = ["UPARAttributeModel", "__version__"]
+__all__ = ["__version__"]

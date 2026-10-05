@@ -1,93 +1,57 @@
-from __future__ import annotations
-
-from pathlib import Path
-
+"""Mô hình huấn luyện: ViT đóng băng (upar.vision) -> Adapter + 3 dải + đối chiếu (upar.head) với 80 text vector (CoOp)."""
 import torch
-from torch import Tensor, nn
+import torch.nn as nn
 
-from .attributes import ATTR_NAMES
-from .head import PartHead
+from .head import PartHead, compute_rows
 from .vision import PatchEncoder
+from .upar_train.losses import GradReverse
+from .upar_train.text import PromptLearner, PromptTextEncoder
 
 
-class UPARAttributeModel(nn.Module):
-    """Trainable UPAR adapter/head with a frozen pretrained CLIP vision tower."""
-
-    def __init__(self, weights_dir: str | Path | None = None) -> None:
+class PartCLIPPAR(nn.Module):
+    def __init__(self, clip_model, c, pairs, part_of_attr, n_domains):
         super().__init__()
-        if weights_dir is None:
-            weights_dir = Path(__file__).parent / "weights"
-        weights_dir = Path(weights_dir)
+        self.grid = (c.img_h // 16, c.img_w // 16)
+        self.rows = compute_rows(self.grid[0], c.part_cuts)          # Đầu [0,r0) | Thân [r0,r1) | Chân [r1,gh)
+        dev = clip_model.positional_embedding.device
+        self.visual = PatchEncoder.from_clip_visual_state(clip_model.visual.state_dict(), self.grid).to(dev)
+        self.prompt = PromptLearner(clip_model, pairs, c.n_ctx, c.ctx_mode, c.ctx_init)
+        self.text = PromptTextEncoder(clip_model, self.prompt.L, c.grad_ckpt)
+        D = clip_model.text_projection.shape[1]
+        self.head = PartHead(D, self.grid, self.rows, part_of_attr, c.adapter_reduction, c.init_scale)
+        self.domain_head = (nn.Sequential(nn.Linear(3 * D, 256), nn.GELU(), nn.Dropout(0.1), nn.Linear(256, n_domains))
+                            if (c.use_grl and n_domains > 1) else None)
 
-        head_checkpoint = torch.load(
-            weights_dir / "head.pt",
-            map_location="cpu",
-            weights_only=True,
-        )
-        vision_state = torch.load(
-            weights_dir / "clip_visual_fp16.pt",
-            map_location="cpu",
-            weights_only=True,
-        )
-        meta = head_checkpoint["meta"]
-        if tuple(meta.get("attr_names", ATTR_NAMES)) != tuple(ATTR_NAMES):
-            raise ValueError("UPAR checkpoint attributes do not match the canonical order.")
+    # --- nhánh ảnh: ViT(freeze) -> Adapter -> 3 part-vectors (+ global) ---
+    def image_parts(self, images):
+        return self.head.parts_from_tokens(self.visual(images))
 
-        self.img_h = int(meta["img_h"])
-        self.img_w = int(meta["img_w"])
-        if self.img_h % 16 or self.img_w % 16:
-            raise ValueError("UPAR checkpoint image dimensions must be divisible by 16.")
-        grid = (self.img_h // 16, self.img_w // 16)
+    # --- nhánh văn bản: soft prompt -> Text Encoder(freeze) -> 80 text vectors [A, 2, 512] ---
+    def text_feats(self):
+        f = self.text(self.prompt(), self.prompt.eot_idx).float()
+        return torch.nn.functional.normalize(f, dim=-1).view(self.prompt.A, 2, -1)
 
-        self.encoder = PatchEncoder.from_clip_visual_state(vision_state, grid)
-        dimension = int(head_checkpoint["text_feats"].shape[-1])
-        self.head = PartHead(
-            dimension,
-            grid,
-            tuple(meta["rows"]),
-            meta["part_of_attr"],
-            int(meta["adapter_reduction"]),
-        )
-        self.head.load_state_dict(head_checkpoint["head"], strict=True)
-        self.register_buffer("text_features", head_checkpoint["text_feats"].float())
+    def logits(self, parts, glob, tfeat):
+        return self.head.logits(parts, glob, tfeat)
 
-        calibration = head_checkpoint["calib"]
-        self.register_buffer("calibration_a", calibration["a"].float())
-        self.register_buffer("calibration_b", calibration["b"].float())
-        self.register_buffer("calibration_off", calibration["off"].float())
-        self.tta = bool(meta.get("tta", True))
+    def domain_logits(self, parts, lambd):
+        return self.domain_head(GradReverse.apply(parts.flatten(1), lambd))
 
-    def train(self, mode: bool = True) -> UPARAttributeModel:
-        super().train(mode)
-        self.encoder.eval()
-        return self
+    # --- nạp trọng số trainable (tương thích checkpoint của bản cũ: adapter.* / log_tau -> head.adapter.* / head.log_tau) ---
+    LEGACY_PREFIX = (("adapter.", "head.adapter."), ("log_tau", "head.log_tau"))
 
-    def _forward_logits(self, images: Tensor) -> Tensor:
-        parts, global_features = self.head.parts_from_tokens(self.encoder(images))
-        return self.head.logits(parts, global_features, self.text_features)
-
-    def forward(self, images: Tensor) -> Tensor:
-        if images.ndim != 4 or images.shape[1] != 3:
-            raise ValueError("images must have shape [B, 3, H, W]")
-        if images.shape[-2:] != (self.img_h, self.img_w):
-            raise ValueError(
-                f"UPAR checkpoint expects images of size {self.img_h}x{self.img_w}, "
-                f"got {images.shape[-2]}x{images.shape[-1]}"
-            )
-
-        logits = self._forward_logits(images)
-        if self.training:
-            return logits
-
-        if self.tta:
-            flipped_logits = self._forward_logits(torch.flip(images, dims=[3]))
-            logits = 0.5 * (logits + flipped_logits)
-
-        return (
-            self.calibration_a.exp() * logits
-            + self.calibration_b
-            + self.calibration_off
-        )
-
-
-__all__ = ["UPARAttributeModel"]
+    def load_trainable(self, sd):
+        fixed = {}
+        for k, v in sd.items():
+            for old, new in self.LEGACY_PREFIX:
+                if k.startswith(old):
+                    k = new + k[len(old):]
+                    break
+            fixed[k] = v
+        _, unexpected = self.load_state_dict(fixed, strict=False)
+        need = {n for n, p in self.named_parameters() if p.requires_grad}
+        missing = sorted(need - set(fixed))
+        if unexpected or missing:
+            raise RuntimeError("Checkpoint không khớp kiến trúc hiện tại. Key lạ: %s | thiếu: %s. "
+                               "Đặt cfg.resume=False (best.pt cũ sẽ được sao lưu) hoặc dùng out_dir khác." % (unexpected[:5], missing[:5]))
+        return fixed
