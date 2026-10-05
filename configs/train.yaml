@@ -20,7 +20,7 @@ hyper_param:
   hub_name: "upar2026-track1-model"
 
   # Augmentation
-  aug: True
+  aug: False
   median: True
   horizontal_flip: True
   random_resized_crop: False

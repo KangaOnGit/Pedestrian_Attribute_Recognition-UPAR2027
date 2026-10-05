@@ -54,6 +54,35 @@ class DINOv3FeatureEncoder(nn.Module):
         
         return self.projection(flat_region)
 
+    def forward_with_patch_grid(
+        self,
+        images_no_aug: Float[torch.Tensor, "B 3 H W"],
+    ) -> tuple[
+        Float[torch.Tensor, "B Hd"],
+        Float[torch.Tensor, "B Hd Gh Gw"],
+    ]:
+        """Return the full-image feature and projected spatial patch features."""
+        pooled_features, patch_grid = self._encode_image(images_no_aug)
+        if patch_grid is None:
+            raise RuntimeError(
+                "DINOv3 must expose patch tokens matching its configured patch grid"
+            )
+
+        region_features: Float[torch.Tensor, "B 3 DinoHd"] = F.adaptive_avg_pool2d(
+            patch_grid,
+            output_size=(3, 1),
+        ).squeeze(-1).transpose(1, 2)
+        regions: Float[torch.Tensor, "B 4 Hd"] = self.token_projection(
+            torch.cat((pooled_features[:, None], region_features), dim=1)
+        )
+        image_features: Float[torch.Tensor, "B Hd"] = self.projection(
+            regions.flatten(start_dim=1)
+        )
+        patch_features: Float[torch.Tensor, "B Hd Gh Gw"] = self.token_projection(
+            patch_grid.permute(0, 2, 3, 1)
+        ).permute(0, 3, 1, 2)
+        return image_features, patch_features
+
     def forward_regions(self,
                         images_aug: Float[torch.Tensor, "B 3 H W"]
                         ) -> Float[torch.Tensor, "B 4 Hd"]:
@@ -219,14 +248,18 @@ class ConvFeatureEncoder(nn.Module):
     def forward(self,
                 images_aug: Float[torch.Tensor, "B C H W"]
                 ) -> Float[torch.Tensor, "B Hd"]:
-        feature_map: Float[torch.Tensor, "B Hd Hf Wf"] = self._feature_map(images_aug)
+        feature_map: Float[torch.Tensor, "B Hd Hf Wf"] = self.forward_spatial_features(
+            images_aug
+        )
         return F.adaptive_avg_pool2d(feature_map, 1).flatten(start_dim=1)
 
     def forward_regions(self,
                         images_aug: Float[torch.Tensor, "B C H W"]
                         ) -> Float[torch.Tensor, "B 4 Hd"]:
         
-        feature_map: Float[torch.Tensor, "B Hd Hf Wf"] = self._feature_map(images_aug)
+        feature_map: Float[torch.Tensor, "B Hd Hf Wf"] = self.forward_spatial_features(
+            images_aug
+        )
         
         global_feature: Float[torch.Tensor, "B Hd"] = F.adaptive_avg_pool2d(
             feature_map,
@@ -240,9 +273,10 @@ class ConvFeatureEncoder(nn.Module):
         
         return torch.cat((global_feature[:, None], region_features), dim=1)
 
-    def _feature_map(self,
-                     images_aug: Float[torch.Tensor, "B C H W"]
-                     ) -> Float[torch.Tensor, "B Hd Hf Wf"]:
+    def forward_spatial_features(
+        self,
+        images_aug: Float[torch.Tensor, "B C H W"],
+    ) -> Float[torch.Tensor, "B Hd Hf Wf"]:
         return self.features[:-2](images_aug)
 class ImageAttributeModel(nn.Module):
     """Predict attributes from a pretrained full-image feature representation."""

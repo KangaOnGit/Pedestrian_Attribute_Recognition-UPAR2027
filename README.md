@@ -96,29 +96,30 @@ weights are frozen.
 
 The `roi_moe` architecture is motivated by the risk that evidence from small
 regions will be diluted by larger regions when the whole image is represented
-as one feature. Prompted person regions are cropped and routed to their top-k
-ROI experts, which learn to process local visual patterns. Learned attention
-queries combine the resulting expert features, and the model concatenates this
-local representation with a full-image feature. The global branch preserves
-broader context alongside the ROI evidence. A sparse top-k classification
-expert layer then predicts the full attribute vector, returning logits shaped
+as one feature. YOLO-E or SAM 3 proposal boxes select overlapping cells from
+DINOv3's spatial patch grid; each ROI feature is the mean of its selected patch
+embeddings. The ROI features are routed to their top-k experts, then learned
+attention queries combine the resulting expert features. The model concatenates
+this local representation with a full-image feature. A shared feed-forward
+classifier then predicts the full attribute vector, returning logits shaped
 `[batch_size, num_attributes]`.
 
 The ROI experts are not assigned one per label, and the attention queries pool
 ROI-expert features rather than directly representing individual labels. The
 explicit per-attribute query and label-interaction transformer described
 above belong to the `image` architecture. In `roi_moe`, attribute predictions
-share the fused representation and selected classification experts. Expert
-routing provides a way for the model to learn specialized processing; it is
-not a claim that experts are inherently superior to a standard feed-forward
-classifier.
+share the fused representation and the same classifier; MoE routing is applied
+only to ROI features.
+The patch grid and detector boxes must refer to the same unaugmented image
+coordinates; the ROI model uses the normalized, non-augmented image view for
+both DINOv3 and patch pooling.
 
 YOLO-E and SAM 3 are optional proposal generators. In `loop` mode, YOLO-E
 returns the highest-confidence pixel-coordinate `(x1, y1, x2, y2)` box per
 prompt and image. In `one-pass` mode, it returns all detections for all prompts
 in one call. Since each image can produce a different number of boxes, the
 one-pass result is padded to the largest number of detections in that batch;
-zero-area padding boxes are ignored by the ROI encoder.
+zero-area padding boxes are ignored by ROI pooling.
 Automatic proposal generation can be disabled with `--roi-generator none`, or
 caller-provided `roi_boxes` can be used instead.
 
@@ -270,7 +271,6 @@ The ROI hyperparameters are configurable:
 --num-experts 5
 --roi-top-k 1
 --attention-k 2
---segmentation-top-k 3
 --num-attn-heads 4
 --yoloe-prompt-mode one-pass
 ```

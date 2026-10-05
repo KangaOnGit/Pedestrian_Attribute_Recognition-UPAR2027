@@ -76,7 +76,6 @@ class SparseROIAttributeModelTests(unittest.TestCase):
             hidden_dim=16,
             num_experts=3,
             attention_k=2,
-            roi_size=(16, 8),
             **kwargs,
         )
 
@@ -91,30 +90,48 @@ class SparseROIAttributeModelTests(unittest.TestCase):
             dtype=torch.float32,
         )
 
-        logits = model(images, boxes)
+        logits = model(images, images, boxes)
         self.assertEqual(tuple(logits.shape), (2, 7))
-        self.assertEqual(len(model.segmentation_experts), 5)
+        self.assertFalse(hasattr(model, "segmentation_experts"))
+        self.assertFalse(hasattr(model, "segmentation_router"))
         self.assertTrue(torch.isfinite(logits).all())
         logits.sum().backward()
         self.assertIsNotNone(model.roi_router[0].weight.grad)
         self.assertGreater(model.roi_router[0].weight.grad.abs().sum().item(), 0)
         self.assertGreater(
-            model.segmentation_router[0].weight.grad.abs().sum().item(),
+            model.classifier[0].weight.grad.abs().sum().item(),
             0,
         )
 
     def test_roi_features_are_not_attenuated_by_router_probability(self) -> None:
         model = self.build_model()
-        rois = torch.randn(1, 3, 16, 8)
+        rois = torch.randn(1, 1, 16)
         valid = torch.ones(1, 1, dtype=torch.bool)
         routing_logits = torch.tensor([[8.0, 0.0, 0.0]])
 
         with patch.object(model.roi_router, "forward", return_value=routing_logits):
-            features, present = model._encode_rois(rois, valid, batch_size=1)
+            features, present = model._encode_rois(rois, valid)
 
-        expected = model.roi_expert_projection[0](model.roi_experts[0](rois))
+        expected = model.roi_expert_projection[0](
+            model.roi_experts[0](rois[:, 0])
+        )
         torch.testing.assert_close(features[0, 0], expected[0])
         self.assertTrue(present[0, 0])
+
+    def test_roi_box_pools_matching_patch_grid_cells(self) -> None:
+        model = self.build_model()
+        patch_grid = torch.arange(16, dtype=torch.float32).reshape(1, 1, 4, 4)
+        boxes = torch.tensor([[[25.0, 25.0, 75.0, 75.0]]])
+
+        pooled, valid = model._pool_roi_features(
+            patch_grid,
+            boxes,
+            image_height=100,
+            image_width=100,
+        )
+
+        torch.testing.assert_close(pooled, torch.tensor([[[7.5]]]))
+        self.assertTrue(valid[0, 0])
 
     def test_sam3_is_initialized_and_generates_prompt_boxes(self) -> None:
         processor = FakeSam3Processor()
@@ -320,7 +337,11 @@ class SparseROIAttributeModelTests(unittest.TestCase):
 
     def test_dinov3_can_be_used_as_full_image_backbone(self) -> None:
         class FakeDINOv3(nn.Module):
-            config = SimpleNamespace(hidden_size=12)
+            config = SimpleNamespace(
+                hidden_size=12,
+                patch_size=8,
+                num_register_tokens=0,
+            )
 
             def __init__(self) -> None:
                 super().__init__()
@@ -329,7 +350,8 @@ class SparseROIAttributeModelTests(unittest.TestCase):
             def forward(self, **inputs: torch.Tensor) -> object:
                 batch_size = inputs["pixel_values"].shape[0]
                 return SimpleNamespace(
-                    pooler_output=torch.ones(batch_size, 12) * self.weight
+                    pooler_output=torch.ones(batch_size, 12) * self.weight,
+                    last_hidden_state=torch.ones(batch_size, 17, 12) * self.weight,
                 )
 
         class FakeImageProcessor:
@@ -354,7 +376,11 @@ class SparseROIAttributeModelTests(unittest.TestCase):
             ),
         ):
             model = self.build_model(image_backbone_type="dinov3")
-            logits = model(torch.randn(2, 3, 48, 24))
+            images = torch.randn(2, 3, 48, 24)
+            full_image_boxes = torch.tensor(
+                [[[0.0, 0.0, 24.0, 48.0]], [[0.0, 0.0, 24.0, 48.0]]]
+            )
+            logits = model(images, images, full_image_boxes)
 
         self.assertEqual(tuple(logits.shape), (2, 7))
 
@@ -363,7 +389,7 @@ class SparseROIAttributeModelTests(unittest.TestCase):
         images = torch.randn(2, 3, 64, 32)
         padded_boxes = torch.zeros(2, 2, 4)
 
-        logits = model(images, padded_boxes)
+        logits = model(images, images, padded_boxes)
 
         self.assertEqual(tuple(logits.shape), (2, 7))
         self.assertTrue(torch.isfinite(logits).all())
