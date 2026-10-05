@@ -278,12 +278,19 @@ Other useful options:
 --no-augment
 --finetune-backbone
 --resume outputs/train/last_epoch.pt
+--weights outputs/train/best_f1.pt
 --wandb
 --wandb-project UPAR2027
 --wandb-run-name experiment-name
 --hub-repo-id your-org/your-model-name
 --hub-private
 ```
+
+Use `--resume` with a training checkpoint (including `best_f1.pt`) to continue
+from the next epoch with its optimizer and scheduler state. Use `--weights` to
+load only model parameters and start a new training run with a fresh optimizer
+and scheduler. The weights file can be a training checkpoint or a plain model
+state dictionary.
 
 Training augmentations and ImageNet normalization are configured in
 [configs/augmentation.yaml](configs/augmentation.yaml). The input size can be
@@ -321,11 +328,15 @@ Training writes checkpoints and epoch metrics to `outputs/train/` by default:
 
 - `best_mA.pt`
 - `best_f1.pt`
+- `best_challenge_avg.pt`
 - `last_epoch.pt`
 - `train_results.csv`
 
 The checkpoints include model, optimizer, scheduler, epoch, and metric state
-for resuming training.
+for resuming training. `best_f1.pt` tracks the best Label F1; checkpoint
+metadata records it as both `best_f1` and `best_label_f1` for clarity and
+backward compatibility. `best_challenge_avg.pt` tracks the best Challenge
+Average.
 
 ## Repository Structure
 

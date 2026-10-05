@@ -219,11 +219,18 @@ def parse_args() -> argparse.Namespace:
     )
 
     # Checkpointing
-    parser.add_argument(
+    checkpoint_group = parser.add_mutually_exclusive_group()
+    checkpoint_group.add_argument(
         "--resume",
         type=Path,
         default=None,
-        help="Resume from a training checkpoint.",
+        help="Resume model, optimizer, scheduler, and epoch from a training checkpoint.",
+    )
+    checkpoint_group.add_argument(
+        "--weights",
+        type=Path,
+        default=None,
+        help="Initialize model weights from a model state dictionary or training checkpoint.",
     )
 
     # Hugging Face
@@ -438,6 +445,15 @@ def main():
         )
 
         trainer.load_checkpoint(resume_path)
+    elif args.weights is not None:
+        weights_path = resolve_path(args.weights)
+
+        log.info(
+            "Loading model weights from %s",
+            weights_path,
+        )
+
+        trainer.load_weights(weights_path)
 
     # Training
     log.info(

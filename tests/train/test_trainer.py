@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import Mock
 
 import torch
 from torch import nn
 from torch.optim import SGD
 
+from src.metrics.base import eval_metrics
 from src.train.trainer import Trainer
 
 
@@ -104,6 +108,67 @@ class TrainerGradientDiagnosticsTests(unittest.TestCase):
         self.assertEqual(nonfinite_gradients, ["weight", "bias"])
         self.assertEqual(metrics["grad_nonfinite_count"], 2.0)
         self.assertTrue(torch.isnan(torch.tensor(metrics["grad_norm"])))
+
+    def test_train_saves_best_challenge_average_checkpoint(self) -> None:
+        trainer = Trainer.__new__(Trainer)
+        trainer.epochs = 2
+        trainer.start_epoch = 1
+        trainer.global_step = 0
+        trainer.best_mA = float("-inf")
+        trainer.best_f1 = float("-inf")
+        trainer.best_challenge_avg = float("-inf")
+        trainer.wandb_run = None
+        trainer.scheduler = Mock()
+        trainer.optimizer = SGD(nn.Linear(1, 1).parameters(), lr=0.1)
+        trainer.criterion = nn.Identity()
+        trainer.eval = Mock(
+            side_effect=[
+                (
+                    0.5,
+                    eval_metrics(
+                        avg=0.7,
+                        mA=0.6,
+                        label_f1=0.5,
+                        inst_acc=0.4,
+                        inst_prec=0.3,
+                        inst_rec=0.2,
+                        inst_f1=0.1,
+                    ),
+                ),
+                (
+                    0.4,
+                    eval_metrics(
+                        avg=0.65,
+                        mA=0.61,
+                        label_f1=0.55,
+                        inst_acc=0.4,
+                        inst_prec=0.3,
+                        inst_rec=0.2,
+                        inst_f1=0.1,
+                    ),
+                ),
+            ],
+        )
+        trainer.train_epoch = Mock(return_value=1.0)
+
+        with TemporaryDirectory() as output_dir:
+            trainer.output_dir = Path(output_dir)
+            saved_checkpoints: list[tuple[str, eval_metrics]] = []
+            trainer.save_checkpoint = lambda epoch, metrics, filename: (
+                saved_checkpoints.append((filename, metrics))
+            )
+
+            trainer.train()
+
+        challenge_checkpoints = [
+            metrics
+            for filename, metrics in saved_checkpoints
+            if filename == "best_challenge_avg.pt"
+        ]
+        self.assertEqual(len(challenge_checkpoints), 1)
+        self.assertEqual(challenge_checkpoints[0].avg, 0.7)
+        self.assertEqual(trainer.best_challenge_avg, 0.7)
+        self.assertEqual(trainer.best_f1, 0.55)
 
 
 if __name__ == "__main__":

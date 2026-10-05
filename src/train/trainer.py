@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 from src.builders.optimizer import build_optimizer
 from src.train.scheduler import build_scheduler
 from src.builders.loss import build_loss
-from src.train.checkpoint import load_checkpoint, save_checkpoint
+from src.train.checkpoint import load_checkpoint, load_model_weights, save_checkpoint
 from src.utils.config import load_config
 from src.utils.hf_hub import push_folder_to_hub
 from src.utils.wb import log_wandb
@@ -89,6 +89,7 @@ class Trainer:
         self.global_step = 0
         self.best_mA = float("-inf")
         self.best_f1 = float("-inf")
+        self.best_challenge_avg = float("-inf")
         self.config = CONFIG
 
         self.output_dir: Path = Path(output_dir)
@@ -161,13 +162,26 @@ class Trainer:
             log_wandb(self.wandb_run, row)
             self.scheduler.step()
 
-            if eval_result.mA > self.best_mA:
+            is_best_mA = eval_result.mA > self.best_mA
+            if is_best_mA:
                 self.best_mA = eval_result.mA
+
+            is_best_f1 = eval_result.label_f1 > self.best_f1
+            if is_best_f1:
+                self.best_f1 = eval_result.label_f1
+
+            is_best_challenge_avg = eval_result.avg > self.best_challenge_avg
+            if is_best_challenge_avg:
+                self.best_challenge_avg = eval_result.avg
+
+            if is_best_mA:
                 self.save_checkpoint(epoch, eval_result, "best_mA.pt")
 
-            if eval_result.label_f1 > self.best_f1:
-                self.best_f1 = eval_result.label_f1
+            if is_best_f1:
                 self.save_checkpoint(epoch, eval_result, "best_f1.pt")
+
+            if is_best_challenge_avg:
+                self.save_checkpoint(epoch, eval_result, "best_challenge_avg.pt")
 
             self.save_checkpoint(epoch, eval_result, "last_epoch.pt")
 
@@ -503,6 +517,7 @@ class Trainer:
             global_step=self.global_step,
             best_mA=self.best_mA,
             best_f1=self.best_f1,
+            best_challenge_avg=self.best_challenge_avg,
             metrics=metrics,
             config=self.config,
         )
@@ -526,11 +541,25 @@ class Trainer:
         self.start_epoch = checkpoint.get("last_epoch", checkpoint["epoch"]) + 1
         self.global_step = checkpoint.get("global_step", 0)
         self.best_mA = checkpoint.get("best_mA", float("-inf"))
-        self.best_f1 = checkpoint.get("best_f1", float("-inf"))
+        self.best_f1 = checkpoint.get(
+            "best_label_f1",
+            checkpoint.get("best_f1", float("-inf")),
+        )
+        self.best_challenge_avg = checkpoint.get("best_challenge_avg", float("-inf"))
 
         log.info(
             "Resumed checkpoint: %s",
             checkpoint_path,
+        )
+
+    def load_weights(
+        self,
+        weights_path: str | Path,
+    ) -> None:
+        load_model_weights(
+            weights_path,
+            model=self.model,
+            map_location=self.device,
         )
 
     def push_to_hub(
