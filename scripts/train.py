@@ -97,7 +97,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--upar-weights-dir",
         type=Path,
-        default="src\models\upar\weights",
+        default="src/models/upar/weights",
         help=(
             "UPAR initialization directory containing head.pt and "
             "clip_visual_fp16.pt (defaults to src/models/upar/weights)."
