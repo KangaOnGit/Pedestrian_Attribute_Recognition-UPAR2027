@@ -19,4 +19,4 @@ class ROIExpert(nn.Module):
 
     def forward(self,
                 rois: Tensor) -> Tensor:
-        return self.projection(self.encoder(rois))
+        return rois + self.projection(self.encoder(rois))

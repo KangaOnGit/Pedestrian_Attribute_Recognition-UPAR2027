@@ -327,14 +327,14 @@ class SparseROIAttributeModel(nn.Module):
                 continue
             batch_indices: Int[torch.Tensor, "N"] = valid_batches[routed]
             chosen_features: Float[torch.Tensor, "N Hd"] = valid_features[routed]
-            encoded: Float[Tensor, "N Hd"] = expert(chosen_features)
+            encoded: Float[Tensor, "N Hd"] = chosen_features + expert(chosen_features)
             self._validate_encoder_output(
                 encoded,
                 len(batch_indices),
                 self.hidden_dim,
                 f"roi_experts[{expert_index}]",
             )
-            encoded = projection(encoded)
+            encoded = encoded + projection(encoded)
             weighted: Float[Tensor, "N Hd"] = encoded * selected_weights[
                 routed,
                 expert_index,
