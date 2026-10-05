@@ -1,4 +1,4 @@
-prompts = [
+prompts: [
     "person",
     "face",
     "hair",
