@@ -255,6 +255,25 @@ python scripts/train.py \
   --output-dir outputs/roi_moe
 ```
 
+Train and evaluate the UPAR model through the same trainer:
+
+```bash
+python scripts/train.py \
+  --architecture upar \
+  --train-csv data/annotations/train.csv \
+  --val-csv data/annotations/val.csv \
+  --batch-size 64 \
+  --epochs 5 \
+  --lr 0.0001 \
+  --output-dir outputs/upar
+```
+
+By default, UPAR initializes from `src/models/upar/weights/` and fine-tunes
+its adapter and attribute temperatures while keeping the CLIP vision tower
+frozen. The same trainer handles validation, metrics, and checkpoints. Use
+`--upar-weights-dir` to initialize from another directory containing
+`head.pt` and `clip_visual_fp16.pt`.
+
 The ROI hyperparameters are configurable:
 
 ```bash

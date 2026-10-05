@@ -6,6 +6,7 @@ from src.models.roi_moe import (
     YOLOEPromptBoxGenerator,
 )
 from src.models.feature_encoder import ImageAttributeModel
+from src.models.upar.model import UPARAttributeModel
 
 __all__ = [
     "ConvFeatureEncoder",
@@ -13,5 +14,6 @@ __all__ = [
     "ImageAttributeModel",
     "Sam3PromptBoxGenerator",
     "SparseROIAttributeModel",
+    "UPARAttributeModel",
     "YOLOEPromptBoxGenerator",
 ]

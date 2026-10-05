@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import logging
 import torch
+from collections.abc import Sequence
 
 from PIL import Image
 from torch.utils.data import Dataset
@@ -34,6 +35,8 @@ class UPAR_dataset(Dataset):
         rgb_shift: bool = True,
         image_compression: bool = True,
         include_detector_images: bool = False,
+        normalization_mean: Sequence[float] | None = None,
+        normalization_std: Sequence[float] | None = None,
     ):
         """
         Args:
@@ -155,6 +158,8 @@ class UPAR_dataset(Dataset):
             rgb_shift=self.aug and self.rgb_shift,
             image_compression=self.aug and self.image_compression,
             split=self.split,
+            normalization_mean=normalization_mean,
+            normalization_std=normalization_std,
         )
         
         self.transform_no_aug = build_transforms(
@@ -171,6 +176,8 @@ class UPAR_dataset(Dataset):
             rgb_shift=False,
             image_compression=False,
             split=self.split,
+            normalization_mean=normalization_mean,
+            normalization_std=normalization_std,
         )
 
         self.transform_detector = (

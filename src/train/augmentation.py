@@ -1,6 +1,7 @@
 
 import albumentations as A
 import logging
+from collections.abc import Sequence
 
 from albumentations.pytorch import ToTensorV2
 from src.utils.config import load_config
@@ -24,6 +25,8 @@ def build_transforms(
     image_compression: bool = True,
     split: str = "train",
     normalize: bool = True,
+    normalization_mean: Sequence[float] | None = None,
+    normalization_std: Sequence[float] | None = None,
 ) -> A.Compose:
 
     """
@@ -193,8 +196,8 @@ def build_transforms(
         c = config["norm"]
         transforms.append(
             A.Normalize(
-                mean=c["mean"],
-                std=c["std"],
+                mean=normalization_mean if normalization_mean is not None else c["mean"],
+                std=normalization_std if normalization_std is not None else c["std"],
             )
         )
 

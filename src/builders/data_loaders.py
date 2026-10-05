@@ -1,6 +1,7 @@
 from src.builders.augmentation import build_augmentation_flags
 from src.train.load_data import UPAR_dataset
 from src.utils.config import load_config, resolve_path
+from src.models.upar.vision import CLIP_MEAN, CLIP_STD
 from torch.utils.data import DataLoader
 
 CONFIG = load_config("configs/train.yaml")
@@ -17,6 +18,11 @@ def build_dataloaders(args,
 
     train_aug_flags = build_augmentation_flags(TRAIN_AUGMENTATION)
     eval_aug_flags = build_augmentation_flags(EVAL_AUGMENTATION)
+    normalization = (
+        {"normalization_mean": CLIP_MEAN, "normalization_std": CLIP_STD}
+        if args.architecture == "upar"
+        else {}
+    )
 
     train_dataset = UPAR_dataset(
         data_path=str(resolve_path(args.train_csv)),
@@ -32,6 +38,7 @@ def build_dataloaders(args,
             args.architecture == "roi_moe" and args.roi_generator != "none"
         ),
         **train_aug_flags,
+        **normalization,
         height = height,
         width = width,
     )
@@ -43,6 +50,7 @@ def build_dataloaders(args,
         num_samples=args.eval_num_samples,
         aug=False,
         **eval_aug_flags,
+        **normalization,
         height = height,
         width = width,
         include_detector_images=(
