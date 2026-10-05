@@ -130,21 +130,6 @@ def parse_args() -> argparse.Namespace:
         default=1,
         help="Number of ROI experts selected per ROI.",
     )
-    parser.add_argument(
-        "--attention-k",
-        type=int,
-        default=2,
-        help="Number of learned ROI attention queries.",
-    )
-    parser.add_argument(
-        "--num-attn-heads",
-        "--num-attention-heads",
-        dest="num_attn_heads",
-        type=int,
-        default=4,
-        help="Number of attention heads for --architecture=roi_moe.",
-    )
-    
     # Training
     parser.add_argument(
         "--batch-size",
@@ -316,10 +301,6 @@ def validate_args(args):
             raise SystemExit("--num-experts must be at least 1")
         if not 1 <= args.roi_top_k <= args.num_experts:
             raise SystemExit("--roi-top-k must be between 1 and --num-experts")
-        if args.attention_k < 1:
-            raise SystemExit("--attention-k must be at least 1")
-        if args.num_attn_heads < 1:
-            raise SystemExit("--num-attn-heads must be at least 1")
 
 
 def main():
@@ -395,8 +376,6 @@ def main():
             hidden_dim=args.hidden_dim if args.hidden_dim is not None else 128,
             num_experts=args.num_experts,
             roi_top_k=args.roi_top_k,
-            attention_k=args.attention_k,
-            num_attention_heads=args.num_attn_heads,
             prompts=PROMPTS if args.roi_generator != "none" else (),
             roi_generator=args.roi_generator,
             yoloe_prompt_mode=args.yoloe_prompt_mode,

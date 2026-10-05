@@ -279,7 +279,7 @@ class ConvFeatureEncoder(nn.Module):
     ) -> Float[torch.Tensor, "B Hd Hf Wf"]:
         return self.features[:-2](images_aug)
 class ImageAttributeModel(nn.Module):
-    """Predict attributes from a pretrained full-image feature representation."""
+    """Predict attributes from a pooled full-image feature representation."""
 
     def __init__(
         self,
@@ -305,37 +305,10 @@ class ImageAttributeModel(nn.Module):
             if backbone_type == "dinov3"
             else ConvFeatureEncoder(in_channels=3, hidden_dim=hidden_dim)
         )
-        
-        if hidden_dim % 4:
-            raise ValueError("hidden_dim must be divisible by 4 for label attention")
-        
-        # [1, K, Hd]
-        self.attribute_queries = nn.Parameter(torch.empty(1, num_classes, hidden_dim))
-        nn.init.normal_(self.attribute_queries, std=hidden_dim**-0.5)
-        
-        # Q[B, K, Hd]
-        # K[B, VT, Hd]
-        # V[B, VT, Hd]
-        self.visual_attention = nn.MultiheadAttention(
-            hidden_dim,
-            num_heads=4,
-            batch_first=True,
-        )
-        self.label_interaction = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(
-                d_model=hidden_dim,
-                nhead=4,
-                dim_feedforward=hidden_dim * 2,
-                dropout=0.1,
-                activation="gelu",
-                batch_first=True,
-            ),
-            num_layers=2,
-        )
         self.classifier = nn.Sequential(
             nn.LayerNorm(hidden_dim),
             nn.Dropout(0.2),
-            nn.Linear(hidden_dim, 1),
+            nn.Linear(hidden_dim, num_classes),
         )
         self.hidden_dim = hidden_dim
         self.num_classes = num_classes
@@ -348,39 +321,9 @@ class ImageAttributeModel(nn.Module):
         """
         if images.ndim != 4 or images.shape[1] != 3:
             raise ValueError("images must have shape [B, 3, H, W]")
-        
-        # VT can either be actual VT or 4
-        features: Float[torch.Tensor, "B VT Hd"] = (
-            self.backbone.forward_patch_tokens(images)
-            if isinstance(self.backbone, DINOv3FeatureEncoder)
-            else self.backbone.forward_regions(images)
-        )
-        
-        if (
-            features.ndim != 3
-            or features.shape[0] != images.shape[0]
-            or features.shape[2] != self.hidden_dim
-        ):
+        features: Float[torch.Tensor, "B Hd"] = self.backbone(images)
+        if features.ndim != 2 or features.shape != (images.shape[0], self.hidden_dim):
             raise ValueError(
-                "image backbone must return [B, visual_tokens, hidden_dim] features"
+                "image backbone must return [B, hidden_dim] features"
             )
-            
-        queries: Float[torch.Tensor, "B K Hd"] = self.attribute_queries.expand(
-            images.shape[0],
-            -1,
-            -1,
-        )
-        
-        # [B, K, Hd]
-        attribute_features, _ = self.visual_attention(
-            queries,
-            features,
-            features,
-            need_weights=False,
-        )
-        attribute_features: Float[torch.Tensor, "B K Hd"] = self.label_interaction(
-            attribute_features
-        )
-        
-        # [B, K, 1] -> [B, K]
-        return self.classifier(attribute_features).squeeze(-1)
+        return self.classifier(features)

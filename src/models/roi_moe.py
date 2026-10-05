@@ -23,12 +23,10 @@ class SparseROIAttributeModel(nn.Module):
         num_classes: int,
         hidden_dim: int,
         num_experts: int,
-        attention_k: int,
         
         *,
         in_channels: int = 3,
         roi_top_k: int = 1,
-        num_attention_heads: int = 4,
         prompts: Sequence[str] = (),
         roi_generator: Literal["none", "sam3", "yoloe"] = "yoloe",
         sam3_model_id: str = "facebook/sam3",
@@ -44,12 +42,10 @@ class SparseROIAttributeModel(nn.Module):
         
     ) -> None:
         super().__init__()
-        if min(num_classes, hidden_dim, num_experts, attention_k) < 1:
-            raise ValueError("num_classes, hidden_dim, num_experts, and attention_k must be positive")
+        if min(num_classes, hidden_dim, num_experts) < 1:
+            raise ValueError("num_classes, hidden_dim, and num_experts must be positive")
         if not 1 <= roi_top_k <= num_experts:
             raise ValueError("roi_top_k must be between 1 and num_experts")
-        if num_attention_heads < 1 or hidden_dim % num_attention_heads:
-            raise ValueError("hidden_dim must be divisible by num_attention_heads")
         if in_channels < 1:
             raise ValueError("in_channels must be positive")
         if roi_generator not in ("none", "sam3", "yoloe"):
@@ -132,16 +128,7 @@ class SparseROIAttributeModel(nn.Module):
                 for _ in range(num_experts)
             ]
         )
-        self.attention_queries = nn.Parameter(torch.empty(1, attention_k, hidden_dim))
-        nn.init.normal_(self.attention_queries, std=hidden_dim**-0.5)
-        self.roi_attention = nn.MultiheadAttention(
-            hidden_dim,
-            num_attention_heads,
-            batch_first=True,
-        )
-        self.attention_k: int = attention_k
-
-        fused_dim: int = hidden_dim * (attention_k + 1)
+        fused_dim: int = hidden_dim * 2
 
         self.classifier = nn.Sequential(
             nn.Linear(fused_dim, hidden_dim),
@@ -228,28 +215,12 @@ class SparseROIAttributeModel(nn.Module):
             coordinate_width,
         )
         roi_features, expert_present = self._encode_rois(pooled_rois, roi_valid)
-
-        safe_padding_mask: Bool[torch.Tensor, "B E"] = ~expert_present
-        if safe_padding_mask.numel():
-            safe_padding_mask = safe_padding_mask.clone()
-            safe_padding_mask[~expert_present.any(dim=1), 0] = False
-        queries: Float[torch.Tensor, "B K Hd"] = self.attention_queries.expand(
-            batch_size,
-            -1,
-            -1,
+        present_weights: Float[torch.Tensor, "B E"] = expert_present.to(
+            roi_features.dtype
         )
-        attention_result = self.roi_attention(
-            queries,
-            roi_features,
-            roi_features,
-            key_padding_mask=safe_padding_mask,
-            need_weights=False,
-        )
-        attended: Float[torch.Tensor, "B K Hd"] = attention_result[0]
-        attended = attended * expert_present.any(dim=1)[:, None, None]
-        roi_branch: Float[torch.Tensor, "B K*Hd"] = attended.reshape(
-            batch_size,
-            self.attention_k * self.hidden_dim,
+        roi_branch: Float[torch.Tensor, "B Hd"] = (
+            roi_features.sum(dim=1)
+            / present_weights.sum(dim=1).clamp_min(1)[:, None]
         )
 
         self._validate_encoder_output(

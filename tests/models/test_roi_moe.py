@@ -75,7 +75,6 @@ class SparseROIAttributeModelTests(unittest.TestCase):
             num_classes=7,
             hidden_dim=16,
             num_experts=3,
-            attention_k=2,
             **kwargs,
         )
 
@@ -94,6 +93,13 @@ class SparseROIAttributeModelTests(unittest.TestCase):
         self.assertEqual(tuple(logits.shape), (2, 7))
         self.assertFalse(hasattr(model, "segmentation_experts"))
         self.assertFalse(hasattr(model, "segmentation_router"))
+        self.assertFalse(
+            any(
+                isinstance(layer, nn.MultiheadAttention)
+                for layer in model.modules()
+            )
+        )
+        self.assertEqual(model.classifier[0].in_features, 32)
         self.assertTrue(torch.isfinite(logits).all())
         logits.sum().backward()
         self.assertIsNotNone(model.roi_router[0].weight.grad)

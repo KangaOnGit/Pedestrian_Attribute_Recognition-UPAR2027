@@ -61,17 +61,13 @@ and 3:
   experts assigned to particular labels; the gating network learns which
   experts process each region.
 - **Global context alongside ROIs:** full-image features are concatenated with
-  attended ROI-expert features before classification. This lets the classifier
+  pooled ROI-expert features before classification. This lets the classifier
   use broad person context together with local evidence, including when a
   proposal is incomplete or unhelpful. It is a complementary path, not a
   guarantee that proposal errors will be corrected.
-- **Attribute-aware representations and interaction:** in the `image`
-  architecture, a learned query for each attribute attends over visual tokens,
-  then a transformer processes the set of attribute features. This explicitly
-  models relationships among attribute representations. In `roi_moe`,
-  attention summarizes ROI-expert features and sparse classification experts
-  predict the attribute vector from those features and the full-image
-  context.
+- **Shared multi-label prediction:** the `image` architecture classifies a
+  pooled image feature, while `roi_moe` combines full-image features with
+  averaged ROI-expert features before predicting the attribute vector.
 - **Imbalance-aware training:** focal loss can derive per-attribute positive
   and class weights from the selected training labels.
 
@@ -82,10 +78,8 @@ they do not constitute a formal domain-adaptation algorithm.
 
 ### Attribute-aware image model
 
-The default `image` architecture uses a pretrained DINOv3 encoder. Its global
-and spatial patch features are presented to learned per-attribute queries
-through cross-attention. A two-layer transformer then models interactions
-between attribute features, and a shared classifier head outputs one logit per
+The default `image` architecture uses a pretrained DINOv3 encoder. Its pooled
+global feature feeds a shared classifier head that outputs one logit per
 attribute.
 
 Use `--backbone conv` for a convolutional encoder trained from scratch. Use
@@ -99,17 +93,15 @@ regions will be diluted by larger regions when the whole image is represented
 as one feature. YOLO-E or SAM 3 proposal boxes select overlapping cells from
 DINOv3's spatial patch grid; each ROI feature is the mean of its selected patch
 embeddings. The ROI features are routed to their top-k experts, then learned
-attention queries combine the resulting expert features. The model concatenates
-this local representation with a full-image feature. A shared feed-forward
-classifier then predicts the full attribute vector, returning logits shaped
-`[batch_size, num_attributes]`.
+experts process them. The model averages the outputs of experts that received
+ROIs and concatenates this local representation with a full-image feature; if
+an image has no valid ROIs, its local representation is zero. A shared
+feed-forward classifier then predicts the full attribute vector, returning
+logits shaped `[batch_size, num_attributes]`.
 
-The ROI experts are not assigned one per label, and the attention queries pool
-ROI-expert features rather than directly representing individual labels. The
-explicit per-attribute query and label-interaction transformer described
-above belong to the `image` architecture. In `roi_moe`, attribute predictions
-share the fused representation and the same classifier; MoE routing is applied
-only to ROI features.
+The ROI experts are not assigned one per label. Attribute predictions share
+the fused representation and classifier; MoE routing is applied only to ROI
+features.
 The patch grid and detector boxes must refer to the same unaugmented image
 coordinates; the ROI model uses the normalized, non-augmented image view for
 both DINOv3 and patch pooling.
@@ -133,7 +125,6 @@ model = SparseROIAttributeModel(
     num_classes=40,
     hidden_dim=128,
     num_experts=5,
-    attention_k=2,
     roi_generator="yoloe",
     prompts=("person", "backpack"),
     yoloe_prompt_mode="one-pass",
@@ -228,7 +219,7 @@ Training without remote logging or Hub upload does not require these values.
 
 ## Training
 
-Train the default DINOv3 attribute-aware image model:
+Train the default DINOv3 image attribute model:
 
 ```bash
 python scripts/train.py \
@@ -270,15 +261,12 @@ The ROI hyperparameters are configurable:
 --hidden-dim 128
 --num-experts 5
 --roi-top-k 1
---attention-k 2
---num-attn-heads 4
 --yoloe-prompt-mode one-pass
 ```
 
-`--hidden` aliases `--hidden-dim`; `--num-attention-heads` aliases
-`--num-attn-heads`. `--yoloe-prompt-mode` accepts `loop` (default) or
-`one-pass`; it applies only when `--roi-generator yoloe`. The default hidden
-dimensions are 256 for `image` and 128 for `roi_moe`. Run
+`--hidden` aliases `--hidden-dim`. `--yoloe-prompt-mode` accepts `loop`
+(default) or `one-pass`; it applies only when `--roi-generator yoloe`. The
+default hidden dimensions are 256 for `image` and 128 for `roi_moe`. Run
 `python scripts/train.py --help` to see all options.
 
 Other useful options:

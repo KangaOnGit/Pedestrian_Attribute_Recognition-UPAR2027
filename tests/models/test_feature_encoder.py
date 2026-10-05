@@ -102,11 +102,14 @@ class FeatureEncoderTests(unittest.TestCase):
         self.assertEqual(tuple(logits.shape), (2, 5))
         logits.sum().backward()
         self.assertIsNotNone(model.classifier[2].weight.grad)
-        self.assertIsNotNone(model.attribute_queries.grad)
-        self.assertIsNotNone(model.visual_attention.in_proj_weight.grad)
-        self.assertIsNotNone(model.label_interaction.layers[0].self_attn.in_proj_weight.grad)
+        self.assertFalse(
+            any(
+                isinstance(layer, (nn.MultiheadAttention, nn.TransformerEncoder))
+                for layer in model.modules()
+            )
+        )
 
-    def test_image_attribute_model_uses_pretrained_region_tokens(self) -> None:
+    def test_image_attribute_model_uses_dinov3_backbone_features(self) -> None:
         with (
             patch(
                 "transformers.AutoImageProcessor.from_pretrained",
@@ -123,11 +126,11 @@ class FeatureEncoderTests(unittest.TestCase):
                 backbone_type="dinov3",
             )
             images = torch.randn(2, 3, 16, 12)
-            visual_tokens = model.backbone.forward_patch_tokens(images)
+            image_features = model.backbone(images)
             logits = model(images)
 
         self.assertEqual(tuple(logits.shape), (2, 5))
-        self.assertEqual(tuple(visual_tokens.shape), (2, 13, 16))
+        self.assertEqual(tuple(image_features.shape), (2, 16))
 
     def test_optimizer_uses_lower_learning_rate_for_finetuned_backbone(self) -> None:
         class ModelWithPretrainedBackbone(nn.Module):
