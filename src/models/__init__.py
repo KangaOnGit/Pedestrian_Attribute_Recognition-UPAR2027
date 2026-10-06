@@ -10,8 +10,9 @@ from src.models.feature_encoder import ImageAttributeModel
 __all__ = [
     "ConvFeatureEncoder",
     "DINOv3FeatureEncoder",
-    "ImageAttributeModel",
     "Sam3PromptBoxGenerator",
-    "SparseROIAttributeModel",
     "YOLOEPromptBoxGenerator",
+    "ROIExpert",
+    "ROIRouter",
+    "SparseROIAttributeModel",
 ]
