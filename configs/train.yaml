@@ -13,7 +13,7 @@ hyper_param:
 
   batch_size: 128
 
-  loss: "focal"
+  loss: "FocalAsym"
   optim: "adamw"
   workers: 0
   output_dir: "outputs/train"
@@ -33,17 +33,17 @@ hyper_param:
   image_compression: True
 
   # Resize
-  height: 256
-  width: 256
+  height: 128
+  width: 128
 
 data:
   data_path: "data/annotations/train.csv"
   data_name: null
-  num_samples: 10
+  num_samples: 2
 
 losses:
   focal:
-    alpha: 0.5
+    alpha: 0.2
     gamma: 2
 
   weighted_bce:

@@ -287,7 +287,7 @@ class ImageAttributeModel(nn.Module):
         hidden_dim: int = 256,
         *,
         backbone_type: str = "dinov3",
-        dinov3_model_id: str = "facebook/dinov3-vits16-pretrain-lvd1689m",
+        dinov3_model_id: str = "facebook/dinov3-vitb16-pretrain-lvd1689m",
         backbone_trainable: bool = False,
     ) -> None:
         super().__init__()

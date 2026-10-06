@@ -35,8 +35,6 @@ class FocalLoss(nn.Module):
 
         self.alpha = alpha
         self.gamma = gamma
-        #self.register_buffer("pos_weight", pos_weight)
-        #self.register_buffer("class_weight", class_weight)
 
     def forward(
         self,
@@ -48,7 +46,6 @@ class FocalLoss(nn.Module):
         ce_loss = F.binary_cross_entropy_with_logits(
             logits,
             targets,
-            #pos_weight=self.pos_weight,
             reduction="none",
         )
 

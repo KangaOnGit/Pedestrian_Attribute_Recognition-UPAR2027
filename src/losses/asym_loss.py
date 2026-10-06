@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 
 class AsymmetricLossOptimized(nn.Module):
     ''' Notice - optimized version, minimizes memory allocation and gpu uploading,

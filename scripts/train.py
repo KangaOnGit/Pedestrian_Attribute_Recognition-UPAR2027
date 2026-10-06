@@ -86,7 +86,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--architecture",
         choices=("image", "roi_moe"),
-        default="image",
+        default="roi_moe",
         help=(
             "Choose the image model or prompted ROI mixture-of-experts."
         ),
@@ -185,7 +185,7 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument(
         "--loss",
-        choices=("bce", "weighted_bce", "focal"),
+        choices=("bce", "weighted_bce", "focal", "FocalAsym"),
         default=HYPER_PARAM["loss"],
     )
 
