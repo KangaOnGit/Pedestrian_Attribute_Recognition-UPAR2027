@@ -66,14 +66,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--train-num-samples",
         type=int,
-        default=None,
+        default=2,
         help="Number of training samples.",
     )
     
     parser.add_argument(
         "--eval-num-samples",
         type=int,
-        default=None,
+        default=1,
         help="Number of samples to perform validation on.",
     )
 
@@ -105,7 +105,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--roi-generator",
         choices=("none", "sam3", "yoloe"),
-        default="none",
+        default="yoloe",
         help="Proposal generator when --architecture=roi_moe.",
     )
     parser.add_argument(
@@ -131,7 +131,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--roi-top-k",
         type=int,
-        default=1,
+        default=2,
         help="Number of ROI experts selected per ROI.",
     )
     # Training

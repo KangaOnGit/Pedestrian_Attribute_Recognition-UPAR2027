@@ -2,7 +2,7 @@ import torch.nn as nn
 import torch
 
 from src.losses.focal_loss import FocalLoss
-from src.losses.asym_loss import AsymmetricLossOptimized
+from src.losses.focal_asym import FocalAsym
 from src.utils.config import load_config
 
 CONFIG = load_config("configs/train.yaml")["losses"]
@@ -49,13 +49,11 @@ def build_loss(
         )
         
     if loss_name == "FocalAsym":
-        focal = FocalLoss(
+        focalAsym = FocalAsym(
             alpha=CONFIG["focal"]["alpha"],
             gamma=CONFIG["focal"]["gamma"],
         )
-        
-        asym = AsymmetricLossOptimized()
-        return focal, asym
+        return focalAsym
         
 
     raise ValueError(

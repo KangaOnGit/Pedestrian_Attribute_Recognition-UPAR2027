@@ -28,8 +28,6 @@ class FocalLoss(nn.Module):
         self,
         alpha: float,
         gamma: float,
-        pos_weight: torch.Tensor | None = None,
-        class_weight: torch.Tensor | None = None,
     ) -> None:
         super().__init__()
 
@@ -68,8 +66,5 @@ class FocalLoss(nn.Module):
             )
 
         loss = alpha_t * focal_modulation * ce_loss
-
-        if self.class_weight is not None:
-            loss = loss * self.class_weight
 
         return loss.mean()

@@ -125,8 +125,6 @@ class Trainer:
             self.epochs,
             lr,
         )
-        
-        self.loss_name = loss_name
         # ------------------------------------------
 
     def train(self) -> None:
@@ -249,11 +247,8 @@ class Trainer:
                 raise FloatingPointError(
                     f"Non-finite model logits at epoch {epoch}, batch {batch_idx}"
                 )
-            if self.loss_name == "FocalAsym":
-                focal, asym = self.criterion
-                loss = focal(logits, labels) + asym(logits, labels)
-            else:
-                loss = self.criterion(logits, labels)
+
+            loss = self.criterion(logits, labels)
             if not torch.isfinite(loss):
                 log.error(
                     "Non-finite loss at epoch %d batch %d (global step %d). "
@@ -492,13 +487,8 @@ class Trainer:
                 )
             else:
                 logits = self.model(images_aug)
-            if self.loss_name == "FocalAsym":
-                focal, asym = self.criterion
-                
-                loss = focal(logits, labels) + asym(logits, labels)
-            else:
-                loss = self.criterion(logits, labels)
-                
+
+            loss = self.criterion(logits, labels)
             val_loss += loss.item()
             all_predictions.append(logits.sigmoid().cpu())
             all_labels.append(labels.cpu())
