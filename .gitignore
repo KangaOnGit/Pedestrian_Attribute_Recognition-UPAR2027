@@ -224,6 +224,6 @@ outputs/
 *.pt
 *.pth
 *.ckpt
-mobileclip_blt.ts
+*.ts
 
 MOCK_README.md

@@ -219,13 +219,13 @@ class Trainer:
             self.optimizer.zero_grad()
 
             if isinstance(self.model, SparseROIAttributeModel):
-                logits: Float[torch.Tensor, "B K"] = self.model(
+                logits, aux_loss = self.model(
                     images_aug,
                     images_no_aug,
                     images_detector=images_detector,
                 )
             else:
-                logits = self.model(images_aug)
+                logits, aux_loss = self.model(images_aug)
 
             if not torch.isfinite(logits).all():
                 log.error(
@@ -248,7 +248,7 @@ class Trainer:
                     f"Non-finite model logits at epoch {epoch}, batch {batch_idx}"
                 )
 
-            loss = self.criterion(logits, labels)
+            loss = self.criterion(logits, labels) + aux_loss
             if not torch.isfinite(loss):
                 log.error(
                     "Non-finite loss at epoch %d batch %d (global step %d). "
@@ -480,16 +480,16 @@ class Trainer:
             labels: Float[torch.Tensor, "B K"] = labels.to(self.device)
 
             if isinstance(self.model, SparseROIAttributeModel):
-                logits: Float[torch.Tensor, "B K"] = self.model(
+                logits, aux_loss = self.model(
                     images_aug,
                     images_no_aug,
                     images_detector=images_detector,
                 )
             else:
-                logits = self.model(images_aug)
+                logits, aux_loss = self.model(images_aug)
 
-            loss = self.criterion(logits, labels)
-            val_loss += loss.item()
+            loss = self.criterion(logits, labels) + aux_loss
+            val_loss += loss.item() + aux_loss
             all_predictions.append(logits.sigmoid().cpu())
             all_labels.append(labels.cpu())
 

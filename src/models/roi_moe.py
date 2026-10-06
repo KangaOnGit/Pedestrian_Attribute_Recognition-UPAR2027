@@ -8,6 +8,7 @@ from torch import Tensor, nn
 from torch.nn import functional as F
 from src.models.roi_generator import Sam3PromptBoxGenerator, YOLOEPromptBoxGenerator
 from src.models.feature_encoder import DINOv3FeatureEncoder, ConvFeatureEncoder
+from src.losses.aux_loss import aux_moe_loss
 from jaxtyping import Bool, Float, Int
 class SparseROIAttributeModel(nn.Module):
     """Route DINO-pooled ROI features through experts and fuse with full-image features.
@@ -31,7 +32,7 @@ class SparseROIAttributeModel(nn.Module):
         roi_generator: Literal["none", "sam3", "yoloe"] = "yoloe",
         sam3_model_id: str = "facebook/sam3",
         sam3_score_threshold: float = 0.5,
-        yoloe_model_id: str = "	yoloe-26s-seg.pt",
+        yoloe_model_id: str = "yoloe-26s-seg.pt",
         yoloe_score_threshold: float = 0.3,
         yoloe_prompt_mode: Literal["loop", "one-pass"] = "one-pass",
         
@@ -144,7 +145,7 @@ class SparseROIAttributeModel(nn.Module):
                 roi_boxes: Tensor | None = None,
                 *,
                 images_detector: Float[torch.Tensor, "B 3 H W"] | None = None,
-                ) -> Float[Tensor, "B K"]:
+                ) -> tuple[Float[Tensor, "B K"], Float[Tensor, ""]]:
         """Return multi-label class logits shaped ``[B, num_classes]``.
 
         ``roi_boxes`` uses pixel-coordinate ``(x1, y1, x2, y2)`` values and
@@ -215,7 +216,7 @@ class SparseROIAttributeModel(nn.Module):
             coordinate_height,
             coordinate_width,
         )
-        roi_features, expert_present = self._encode_rois(pooled_rois, roi_valid)
+        roi_features, expert_present, aux_loss = self._encode_rois(pooled_rois, roi_valid)
         
         roi_features = roi_features * expert_present[..., None].float()
 
@@ -231,7 +232,7 @@ class SparseROIAttributeModel(nn.Module):
             (image_features, roi_flat),
             dim=1,
         )
-        return self.classifier(fused_features)
+        return self.classifier(fused_features), aux_loss
 
     def _pool_roi_features(
         self,
@@ -286,7 +287,7 @@ class SparseROIAttributeModel(nn.Module):
         self,
         roi_features: Float[torch.Tensor, "B R Hd"],
         valid: Bool[torch.Tensor, "B R"],
-    ) -> tuple[Float[Tensor, "B E Hd"], Bool[Tensor, "B E"]]:
+    ) -> tuple[Float[Tensor, "B E Hd"], Bool[Tensor, "B E"],  Float[Tensor, ""]]:
         batch_size = roi_features.shape[0]
         expert_features_by_image = roi_features.new_zeros(
             (batch_size, self.num_experts, self.hidden_dim)
@@ -297,19 +298,44 @@ class SparseROIAttributeModel(nn.Module):
             device=roi_features.device,
         )
         if not valid.any():
-            return expert_features_by_image, expert_present
+            return expert_features_by_image, expert_present, roi_features.new_zeros(())
 
         valid_indices: tuple[torch.Tensor, torch.Tensor] = torch.where(valid)
         valid_batches: Int[torch.Tensor, "N"] = valid_indices[0]
         valid_features: Float[torch.Tensor, "N Hd"] = roi_features[valid]
         routing_logits: Float[torch.Tensor, "N E"] = self.roi_router(valid_features)
         probabilities: Float[torch.Tensor, "N E"] = routing_logits.softmax(dim=-1)
-        selected: Bool[torch.Tensor, "N E"] = torch.zeros_like(
+        
+        topk = probabilities.topk(
+            self.roi_top_k,
+            dim=-1,
+        )
+
+        selected = torch.zeros_like(
             probabilities,
             dtype=torch.bool,
         )
-        selected.scatter_(-1, probabilities.topk(self.roi_top_k, dim=-1).indices, True)
-        selected_weights: Float[torch.Tensor, "N E"] = probabilities
+
+        selected.scatter_(
+            -1,
+            topk.indices,
+            True,
+        )
+
+        topk_weights = topk.values
+
+        topk_weights = topk_weights / topk_weights.sum(
+            dim=-1,
+            keepdim=True,
+        ).clamp_min(1e-8)
+
+        selected_weights = torch.zeros_like(probabilities)
+
+        selected_weights.scatter_(
+            -1,
+            topk.indices,
+            topk_weights,
+        )
 
         per_expert_features: list[Float[torch.Tensor, "B Hd"]] = []
         for expert_index, (expert, projection) in enumerate(
@@ -359,7 +385,14 @@ class SparseROIAttributeModel(nn.Module):
             per_expert_features,
             dim=1,
         )
-        return stacked_features, expert_present
+        
+        aux_loss = aux_moe_loss(
+            router_probs = probabilities,
+            expert_indices = topk.indices,
+            num_experts = self.num_experts,
+        )
+        
+        return stacked_features, expert_present, aux_loss
 
     @staticmethod
     def _validate_encoder_output(
