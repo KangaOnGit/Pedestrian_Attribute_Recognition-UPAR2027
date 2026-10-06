@@ -9,7 +9,8 @@ CONFIG = load_config("configs/train.yaml")["losses"]
 
 def build_loss(
     loss_name: str,
-    training_targets: torch.Tensor | None = None,
+    asym_weight: float,
+    focal_weight: float,
 ) -> nn.Module:
     """
     Build loss
@@ -52,6 +53,8 @@ def build_loss(
         focalAsym = FocalAsym(
             alpha=CONFIG["focal"]["alpha"],
             gamma=CONFIG["focal"]["gamma"],
+            asym_weight=asym_weight,
+            focal_weight=focal_weight,
         )
         return focalAsym
         

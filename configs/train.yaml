@@ -32,6 +32,10 @@ hyper_param:
   rgb_shift: False
   image_compression: True
 
+  focal_weight: 1.0
+  asym_weight: 1.0
+  aux_weight: 1.0
+
   # Resize
   height: 128
   width: 128

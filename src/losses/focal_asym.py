@@ -12,6 +12,10 @@ class FocalAsym(nn.Module):
         self,
         alpha: float,
         gamma: float,
+        
+        focal_weight: float,
+        asym_weight: float,
+        
         gamma_neg=4,
         gamma_pos=1,
         clip=0.05,
@@ -33,11 +37,14 @@ class FocalAsym(nn.Module):
             disable_torch_grad_focal_loss
         )
         
+        self.asym_weight = asym_weight
+        self.focal_weight = focal_weight
+        
     def forward(
         self,
         logits: Float[torch.Tensor, "B K"],
         targets: Float[torch.Tensor, "B K"],
     ) -> torch.Tensor:
         
-        return self.focal(logits, targets) + self.asym(logits, targets)
+        return self.focal(logits, targets) * self.focal_weight + self.asym(logits, targets) * self.asym_weight
     

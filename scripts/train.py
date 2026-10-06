@@ -188,6 +188,24 @@ def parse_args() -> argparse.Namespace:
         choices=("bce", "weighted_bce", "focal", "FocalAsym"),
         default=HYPER_PARAM["loss"],
     )
+    
+    parser.add_argument(
+        "--asym_weight",
+        type=float,
+        default=HYPER_PARAM["asym_weight"],
+    )
+
+    parser.add_argument(
+        "--focal_weight",
+        type=float,
+        default=HYPER_PARAM["focal_weight"],
+    )
+
+    parser.add_argument(
+        "--aux_weight",
+        type=float,
+        default=HYPER_PARAM["aux_weight"],
+    )
 
     parser.add_argument(
         "--workers",
@@ -434,6 +452,9 @@ def main():
         loss_name=args.loss,
         logging_steps=args.logging_steps,
         wandb_run=wandb_run,
+        asym_weight = args.asym_weight,
+        focal_weight = args.focal_weight,
+        aux_weight=args.aux_weight,
     )
 
     # Resume

@@ -40,7 +40,6 @@ class SparseROIAttributeModel(nn.Module):
         dinov3_model_id: str = "facebook/dinov3-vitb16-pretrain-lvd1689m",
         dinov3_trainable: bool = False,
         image_backbone: nn.Module | None = None,
-        
     ) -> None:
         super().__init__()
         if min(num_classes, hidden_dim, num_experts) < 1:

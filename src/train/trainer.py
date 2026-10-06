@@ -27,6 +27,7 @@ log = logging.getLogger(__name__)
 METRIC_COLUMNS = (
     "epoch",
     "train_loss",
+    "aux_loss",
     "eval_loss",
     "challenge_avg",
     "mA",
@@ -57,6 +58,10 @@ class Trainer:
         
         optim_name: str,
         loss_name: str,
+        
+        asym_weight: float,
+        focal_weight: float,
+        aux_weight: float,
         
         logging_steps: int,
         wandb_run: object | None = None,
@@ -108,8 +113,10 @@ class Trainer:
                     "for per-attribute class balancing."
                 )
             target_tensor = torch.as_tensor(training_targets, dtype=torch.float32)
-        self.criterion: nn.Module = build_loss(loss_name, target_tensor)
-
+        self.criterion: nn.Module = build_loss(loss_name,
+                                               asym_weight = asym_weight,
+                                               focal_weight = focal_weight,)
+        self.aux_weight = aux_weight
         # -------- Loss, Optim, Scheduler -------------
         self.criterion.to(self.device)
         
@@ -141,13 +148,14 @@ class Trainer:
                 csv.DictWriter(csv_file, fieldnames=METRIC_COLUMNS).writeheader()
 
         for epoch in range(self.start_epoch, self.epochs + 1):
-            train_loss = self.train_epoch(epoch)
+            train_loss, aux_loss = self.train_epoch(epoch)
             eval_loss, eval_result = self.eval()
             learning_rate = self.optimizer.param_groups[0]["lr"]
 
             row = {
                 "epoch": epoch,
                 "train_loss": train_loss,
+                "aux_loss": aux_loss,
                 "eval_loss": eval_loss,
                 "challenge_avg": eval_result.avg,
                 "mA": eval_result.mA,
@@ -187,7 +195,7 @@ class Trainer:
 
     def _log_epoch(self, row: dict[str, float | int], csv_path: Path) -> None:
         log.info(
-            f"epoch %d/{self.epochs} | train_loss: %.5f | eval_loss: %.5f | challenge_avg: %.5f "
+            f"epoch %d/{self.epochs} | train_loss: %.5f | aux_loss (train): %.5f | eval_loss: %.5f | challenge_avg: %.5f "
             "mA: %.5f | label_f1: %.5f | inst_acc: %.5f | inst_prec: %.5f "
             "inst_rec: %.5f | inst_f1: %.5f | learning_rate: %.8f",
             *(row[column] for column in METRIC_COLUMNS),
@@ -203,7 +211,7 @@ class Trainer:
         self.model.train()
 
         total_loss: float = 0.0
-
+        total_aux: float = 0.0
         for batch_idx, batch in enumerate(self.train_loader, start=1):
             if len(batch) == 4:
                 images_aug, images_no_aug, images_detector, labels = batch
@@ -248,7 +256,7 @@ class Trainer:
                     f"Non-finite model logits at epoch {epoch}, batch {batch_idx}"
                 )
 
-            loss = self.criterion(logits, labels) + aux_loss
+            loss = self.criterion(logits, labels) + aux_loss * self.aux_weight
             if not torch.isfinite(loss):
                 log.error(
                     "Non-finite loss at epoch %d batch %d (global step %d). "
@@ -337,8 +345,9 @@ class Trainer:
             self.optimizer.step()
 
             total_loss += loss.item()
+            total_aux += aux_loss
 
-            if (batch_idx) % self.logging_steps == 0:
+            if (batch_idx + 1) % self.logging_steps == 0:
                 log.info(
                     "Epoch [%d/%d] | "
                     "Batch [%d/%d] | "
@@ -356,7 +365,7 @@ class Trainer:
 
         if not self.train_loader:
             raise ValueError("Training data loader is empty.")
-        return total_loss / len(self.train_loader)
+        return total_loss / len(self.train_loader), total_aux/len(self.train_loader)
 
     def _nonfinite_gradient_names(self) -> list[str]:
         gradient_tensors = [
@@ -488,8 +497,8 @@ class Trainer:
             else:
                 logits, aux_loss = self.model(images_aug)
 
-            loss = self.criterion(logits, labels) + aux_loss
-            val_loss += loss.item() + aux_loss
+            loss = self.criterion(logits, labels) + aux_loss * self.aux_weight
+            val_loss += loss.item() + aux_loss * self.aux_weight
             all_predictions.append(logits.sigmoid().cpu())
             all_labels.append(labels.cpu())
 
