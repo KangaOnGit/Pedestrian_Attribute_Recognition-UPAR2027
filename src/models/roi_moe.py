@@ -31,7 +31,7 @@ class SparseROIAttributeModel(nn.Module):
         roi_generator: Literal["none", "sam3", "yoloe"] = "yoloe",
         sam3_model_id: str = "facebook/sam3",
         sam3_score_threshold: float = 0.5,
-        yoloe_model_id: str = "yoloe-11s-seg.pt",
+        yoloe_model_id: str = "	yoloe-26s-seg.pt",
         yoloe_score_threshold: float = 0.3,
         yoloe_prompt_mode: Literal["loop", "one-pass"] = "one-pass",
         
