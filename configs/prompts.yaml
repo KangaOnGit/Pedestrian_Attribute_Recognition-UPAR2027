@@ -1,12 +1,10 @@
 prompts: [
-    "person",
     "face",
     "hair",
     "upper body",
     "lower body",
     "backpack",
     "bag",
-    "eyeglasses",
-    "sunglasses",
+    "glasses",
     "hat",
 ]

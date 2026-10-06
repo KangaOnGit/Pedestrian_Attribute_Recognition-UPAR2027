@@ -26,17 +26,17 @@ class SparseROIAttributeModel(nn.Module):
         
         *,
         in_channels: int = 3,
-        roi_top_k: int = 1,
+        roi_top_k: int = 2,
         prompts: Sequence[str] = (),
         roi_generator: Literal["none", "sam3", "yoloe"] = "yoloe",
         sam3_model_id: str = "facebook/sam3",
         sam3_score_threshold: float = 0.5,
         yoloe_model_id: str = "yoloe-11s-seg.pt",
         yoloe_score_threshold: float = 0.3,
-        yoloe_prompt_mode: Literal["loop", "one-pass"] = "loop",
+        yoloe_prompt_mode: Literal["loop", "one-pass"] = "one-pass",
         
-        image_backbone_type: Literal["conv", "dinov3"] = "conv",
-        dinov3_model_id: str = "facebook/dinov3-vits16-pretrain-lvd1689m",
+        image_backbone_type: Literal["conv", "dinov3"] = "dinov3",
+        dinov3_model_id: str = "facebook/dinov3-vitb16-pretrain-lvd1689m",
         dinov3_trainable: bool = False,
         image_backbone: nn.Module | None = None,
         
@@ -128,12 +128,13 @@ class SparseROIAttributeModel(nn.Module):
                 for _ in range(num_experts)
             ]
         )
-        fused_dim: int = hidden_dim * 2
+        fused_dim: int = hidden_dim * (1 + num_experts)
 
         self.classifier = nn.Sequential(
+            nn.LayerNorm(fused_dim),
             nn.Linear(fused_dim, hidden_dim),
             nn.GELU(),
-            nn.Dropout(0.1),
+            nn.Dropout(0.2),
             nn.Linear(hidden_dim, num_classes),
         )
 
@@ -215,13 +216,10 @@ class SparseROIAttributeModel(nn.Module):
             coordinate_width,
         )
         roi_features, expert_present = self._encode_rois(pooled_rois, roi_valid)
-        present_weights: Float[torch.Tensor, "B E"] = expert_present.to(
-            roi_features.dtype
-        )
-        roi_branch: Float[torch.Tensor, "B Hd"] = (
-            roi_features.sum(dim=1)
-            / present_weights.sum(dim=1).clamp_min(1)[:, None]
-        )
+        
+        roi_features = roi_features * expert_present[..., None].float()
+
+        roi_flat = roi_features.flatten(1)
 
         self._validate_encoder_output(
             image_features,
@@ -230,7 +228,7 @@ class SparseROIAttributeModel(nn.Module):
             "image_backbone",
         )
         fused_features: Float[torch.Tensor, "B Fused"] = torch.cat(
-            (image_features, roi_branch),
+            (image_features, roi_flat),
             dim=1,
         )
         return self.classifier(fused_features)
@@ -311,9 +309,7 @@ class SparseROIAttributeModel(nn.Module):
             dtype=torch.bool,
         )
         selected.scatter_(-1, probabilities.topk(self.roi_top_k, dim=-1).indices, True)
-        selected_weights: Float[torch.Tensor, "N E"] = (
-            selected.to(probabilities.dtype) + probabilities - probabilities.detach()
-        )
+        selected_weights: Float[torch.Tensor, "N E"] = probabilities
 
         per_expert_features: list[Float[torch.Tensor, "B Hd"]] = []
         for expert_index, (expert, projection) in enumerate(
