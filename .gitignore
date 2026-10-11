@@ -227,3 +227,7 @@ outputs/
 *.ts
 
 MOCK_README.md
+
+vendor/
+wheels/
+*.safetensors
