@@ -2,9 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from jaxtyping import Float
-
-
 class FocalLoss(nn.Module):
     """
     Binary focal loss for multilabel classification.
@@ -36,8 +33,8 @@ class FocalLoss(nn.Module):
 
     def forward(
         self,
-        logits: Float[torch.Tensor, "B K"],
-        targets: Float[torch.Tensor, "B K"],
+        logits: torch.Tensor,
+        targets: torch.Tensor,
     ) -> torch.Tensor:
 
         # Binary cross entropy for each attribute.

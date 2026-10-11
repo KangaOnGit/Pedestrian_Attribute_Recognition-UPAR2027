@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+VENDOR = ROOT / "vendor"
+sys.path.insert(0, str(VENDOR))
+
 import logging
 from collections.abc import Mapping
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -16,9 +22,7 @@ from model.roi_moe import SparseROIAttributeModel
 # ---------------------------------------------------------------------
 # Paths and inference configuration
 # ---------------------------------------------------------------------
-
-ROOT = Path(__file__).resolve().parent
-
+                
 PROMPTS_PATH = ROOT / "prompts.yaml"
 YOLOE_WEIGHTS_PATH = ROOT / "yoloe-26s-seg.pt"
 DINOV3_MODEL_PATH = ROOT / "dinov3_big_configs"
@@ -50,7 +54,6 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 logging.basicConfig(level=logging.INFO)
 LOGGER = logging.getLogger(__name__)
 
-
 # ---------------------------------------------------------------------
 # Configuration loading
 # ---------------------------------------------------------------------
@@ -70,7 +73,6 @@ def load_config(path: Path) -> dict[str, Any]:
         )
 
     return config
-
 
 # ---------------------------------------------------------------------
 # Checkpoint loading
@@ -153,8 +155,6 @@ def load_model_weights(
     # Fail if any trained parameter is missing or unexpected.
     model.load_state_dict(compatible_state_dict, strict=True)
 
-
-
 # ---------------------------------------------------------------------
 # Model initialization
 # ---------------------------------------------------------------------
@@ -203,11 +203,9 @@ def load_model() -> None:
 
     LOGGER.info("Model loaded successfully on %s", DEVICE)
 
-
 # ---------------------------------------------------------------------
 # Image preprocessing
 # ---------------------------------------------------------------------
-
 
 def load_image(
     image_path: str | Path,
@@ -257,7 +255,6 @@ def load_image(
 # ---------------------------------------------------------------------
 # Forward pass
 # ---------------------------------------------------------------------
-
 
 @torch.inference_mode()
 def forward_batch(
@@ -363,7 +360,6 @@ def predict_batch(
 def predict_image(sample: dict[str, Any]) -> list[float]:
     return predict_batch([sample])[0]
 
-
 if __name__ == "__main__":
     import argparse
 
@@ -422,3 +418,6 @@ if __name__ == "__main__":
     except Exception:
         LOGGER.exception("Inference smoke test failed.")
         raise
+    
+# cd submission
+# python run.py --image .\00001.png

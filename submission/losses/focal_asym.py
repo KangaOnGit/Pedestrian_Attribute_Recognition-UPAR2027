@@ -3,7 +3,6 @@ import torch.nn as nn
 
 from losses.asym_loss import AsymmetricLossOptimized
 from losses.focal_loss import FocalLoss
-from jaxtyping import Float
 
 class FocalAsym(nn.Module):
     
@@ -42,8 +41,8 @@ class FocalAsym(nn.Module):
         
     def forward(
         self,
-        logits: Float[torch.Tensor, "B K"],
-        targets: Float[torch.Tensor, "B K"],
+        logits: torch.Tensor,
+        targets: torch.Tensor,
     ) -> torch.Tensor:
         
         return self.focal(logits, targets) * self.focal_weight + self.asym(logits, targets) * self.asym_weight

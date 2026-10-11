@@ -1,10 +1,9 @@
 import torch
-from jaxtyping import Float, Int
 import torch.nn.functional as F
 
 def aux_moe_loss(
-    router_probs: Float[torch.Tensor, "N E"],
-    expert_indices: Int[torch.Tensor, "N K"],
+    router_probs: torch.Tensor,
+    expert_indices: torch.Tensor,
     num_experts: int,
     ):
     """Auxilliary Loss for MoE

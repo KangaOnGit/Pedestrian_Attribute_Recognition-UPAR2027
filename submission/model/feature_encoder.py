@@ -5,7 +5,6 @@ from torch.nn import functional as F
 
 from torch import Tensor, nn
 from transformers import AutoConfig, AutoImageProcessor, AutoModel, BatchFeature
-from jaxtyping import Float
 
 class DINOv3FeatureEncoder(nn.Module):
     """Use a pretrained DINOv3 model to encode full images."""
@@ -61,20 +60,20 @@ class DINOv3FeatureEncoder(nn.Module):
         return self
 
     def forward(self,
-                images_aug: Float[torch.Tensor, "B 3 H W"]
-                ) -> Float[torch.Tensor, "B Hd"]:
-        regions: Float[torch.Tensor, "B 4 Hd"] = self.forward_regions(images_aug)
+                images_aug: torch.Tensor
+                ) -> torch.Tensor:
+        regions: torch.Tensor = self.forward_regions(images_aug)
         
-        flat_region: Float[torch.Tensor, "B 4*Hd"] = regions.flatten(start_dim=1)
+        flat_region: torch.Tensor = regions.flatten(start_dim=1)
         
         return self.projection(flat_region)
 
     def forward_with_patch_grid(
         self,
-        images_no_aug: Float[torch.Tensor, "B 3 H W"],
+        images_no_aug: torch.Tensor,
     ) -> tuple[
-        Float[torch.Tensor, "B Hd"],
-        Float[torch.Tensor, "B Hd Gh Gw"],
+        torch.Tensor,
+        torch.Tensor,
     ]:
         """Return the full-image feature and projected spatial patch features."""
         pooled_features, patch_grid = self._encode_image(images_no_aug)
@@ -83,47 +82,47 @@ class DINOv3FeatureEncoder(nn.Module):
                 "DINOv3 must expose patch tokens matching its configured patch grid"
             )
 
-        region_features: Float[torch.Tensor, "B 3 DinoHd"] = F.adaptive_avg_pool2d(
+        region_features: torch.Tensor = F.adaptive_avg_pool2d(
             patch_grid,
             output_size=(3, 1),
         ).squeeze(-1).transpose(1, 2)
-        regions: Float[torch.Tensor, "B 4 Hd"] = self.token_projection(
+        regions: torch.Tensor = self.token_projection(
             torch.cat((pooled_features[:, None], region_features), dim=1)
         )
-        image_features: Float[torch.Tensor, "B Hd"] = self.projection(
+        image_features: torch.Tensor = self.projection(
             regions.flatten(start_dim=1)
         )
-        patch_features: Float[torch.Tensor, "B Hd Gh Gw"] = self.token_projection(
+        patch_features: torch.Tensor = self.token_projection(
             patch_grid.permute(0, 2, 3, 1)
         ).permute(0, 3, 1, 2)
         return image_features, patch_features
 
     def forward_regions(self,
-                        images_aug: Float[torch.Tensor, "B 3 H W"]
-                        ) -> Float[torch.Tensor, "B 4 Hd"]:
+                        images_aug: torch.Tensor
+                        ) -> torch.Tensor:
         """Return global and top/middle/bottom visual features."""
         
         pooled_features, patch_grid = self._encode_image(images_aug)
         
         if patch_grid is None:
-            region_features: Float[torch.Tensor, "B 3 DinoHd"] = pooled_features.new_zeros(
+            region_features: torch.Tensor = pooled_features.new_zeros(
                 (pooled_features.shape[0], 3, pooled_features.shape[1])
             )
         else:
-            region_features: Float[torch.Tensor, "B 3 DinoHd"] = F.adaptive_avg_pool2d(
+            region_features: torch.Tensor = F.adaptive_avg_pool2d(
                 patch_grid,
-                output_size=(3, 1), # Float[torch.Tensor, "B DinoHd 3 1"]
+                output_size=(3, 1), # torch.Tensor
             ).squeeze(-1).transpose(1, 2)
             
         return self.token_projection(
             # (Top, Mid, Bot) = 3 + Global = 4
-            # Float[torch.Tensor, "B 4 DinoHd"]
+            # torch.Tensor
             torch.cat((pooled_features[:, None], region_features), dim=1)
         )
 
     def forward_patch_tokens(self,
-                             images_aug: Float[torch.Tensor, "B 3 H W"]
-                             ) -> Float[torch.Tensor, "B VT Hd"]:
+                             images_aug: torch.Tensor
+                             ) -> torch.Tensor:
         """
         Return the global token and each spatially encoded patch token.
             VT: 1 + number_of_patch_tokens
@@ -131,15 +130,15 @@ class DINOv3FeatureEncoder(nn.Module):
         
         pooled_features, patch_grid = self._encode_image(images_aug)
         if patch_grid is None:
-            region_features: Float[torch.Tensor, "B 3 DinoHd"] = pooled_features.new_zeros(
+            region_features: torch.Tensor = pooled_features.new_zeros(
                 (pooled_features.shape[0], 3, pooled_features.shape[1])
             )
             return self.token_projection(
-                # Float[torch.Tensor, "B 4 DinoHd"]
+                # torch.Tensor
                 torch.cat((pooled_features[:, None], region_features), dim=1)
             )
             
-        patch_tokens: Float[torch.Tensor, "B Gh*Gw DinoHd"] = patch_grid.flatten(start_dim=2).transpose(1, 2)
+        patch_tokens: torch.Tensor = patch_grid.flatten(start_dim=2).transpose(1, 2)
         return self.token_projection(
             # Gh*Gw + 1 = VT
             # [B VT DinoHd]
@@ -147,10 +146,10 @@ class DINOv3FeatureEncoder(nn.Module):
         )
 
     def _encode_image(self,
-                      images_no_aug: Float[torch.Tensor, "B 3 H W"]
+                      images_no_aug: torch.Tensor
                       ) -> tuple[
-                          Float[torch.Tensor, "B DinoHd"],
-                          Float[torch.Tensor, "B DinoHd Gh Gw"] | None,
+                          torch.Tensor,
+                          torch.Tensor | None,
                       ]:
         """
         Args:
@@ -174,12 +173,12 @@ class DINOv3FeatureEncoder(nn.Module):
             with torch.no_grad():
                 outputs = self.model(**processor_inputs)
                 
-        last_hidden_state: Float[Tensor, "B T DinoHd"] | None = getattr(
+        last_hidden_state: Tensor | None = getattr(
             outputs,
             "last_hidden_state",
             None,
         )
-        pooled_features: Float[Tensor, "B DinoHd"] | None = getattr(
+        pooled_features: Tensor | None = getattr(
             outputs,
             "pooler_output",
             None,
@@ -193,8 +192,8 @@ class DINOv3FeatureEncoder(nn.Module):
 
         patch_size = getattr(self.model.config, "patch_size", None)
         register_tokens = getattr(self.model.config, "num_register_tokens", 0)
-        pixel_values: Float[torch.Tensor, "B 3 DinoH DinoW"] = processor_inputs["pixel_values"]
-        patch_grid: Float[torch.Tensor, "B DinoHd Gh Gw"] | None = None
+        pixel_values: torch.Tensor = processor_inputs["pixel_values"]
+        patch_grid: torch.Tensor | None = None
         if (
             isinstance(last_hidden_state, Tensor)
             and isinstance(patch_size, int)
@@ -204,11 +203,11 @@ class DINOv3FeatureEncoder(nn.Module):
         ):
             grid_height: int = pixel_values.shape[-2] // patch_size
             grid_width: int = pixel_values.shape[-1] // patch_size
-            patch_tokens: Float[torch.Tensor, "B P DinoHd"] = last_hidden_state[
+            patch_tokens: torch.Tensor = last_hidden_state[
                 :, 1 + register_tokens :
             ]
             if patch_tokens.shape[1] == grid_height * grid_width:
-                patch_grid: Float[torch.Tensor, "B DinoHd Gh Gw"] = patch_tokens.reshape(
+                patch_grid: torch.Tensor = patch_tokens.reshape(
                     patch_tokens.shape[0],
                     grid_height,
                     grid_width,
@@ -217,8 +216,6 @@ class DINOv3FeatureEncoder(nn.Module):
         return pooled_features, patch_grid
 from torch import Tensor, nn
 from torch.nn import functional as F
-from jaxtyping import Float
-
 
 class ConvFeatureEncoder(nn.Module):
     """Small convolutional encoder."""
@@ -267,14 +264,14 @@ class ConvFeatureEncoder(nn.Module):
 
     def forward_spatial_features(
         self,
-        images: Float[Tensor, "B C H W"],
-    ) -> Float[Tensor, "B D Hf Wf"]:
+        images: Tensor,
+    ) -> Tensor:
         return self.features(images)
 
     def forward(
         self,
-        images: Float[Tensor, "B C H W"],
-    ) -> Float[Tensor, "B D"]:
+        images: Tensor,
+    ) -> Tensor:
         features = self.forward_spatial_features(images)
         return F.adaptive_avg_pool2d(
             features,
@@ -283,8 +280,8 @@ class ConvFeatureEncoder(nn.Module):
 
     def forward_regions(
         self,
-        images: Float[Tensor, "B C H W"],
-    ) -> Float[Tensor, "B 4 D"]:
+        images: Tensor,
+    ) -> Tensor:
 
         feature_map = self.forward_spatial_features(images)
 
@@ -341,14 +338,14 @@ class ImageAttributeModel(nn.Module):
         self.num_classes = num_classes
 
     def forward(self,
-                images: Float[torch.Tensor, "B 3 H W"]
-                ) -> Float[torch.Tensor, "B K"]:
+                images: torch.Tensor
+                ) -> torch.Tensor:
         """
         K is the number of classes
         """
         if images.ndim != 4 or images.shape[1] != 3:
             raise ValueError("images must have shape [B, 3, H, W]")
-        features: Float[torch.Tensor, "B Hd"] = self.backbone(images)
+        features: torch.Tensor = self.backbone(images)
         if features.ndim != 2 or features.shape != (images.shape[0], self.hidden_dim):
             raise ValueError(
                 "image backbone must return [B, hidden_dim] features"

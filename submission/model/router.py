@@ -8,8 +8,6 @@ from torch import Tensor, nn
 from torch.nn import functional as F
 from torchvision.ops import roi_align
 
-from jaxtyping import Bool, Float
-
 from model.roi_generator import (
     YOLOEPromptBoxGenerator,
 )
@@ -19,7 +17,6 @@ from model.feature_encoder import (
 )
 from model.experts import ROIExpert
 from losses.aux_loss import aux_moe_loss
-
 
 class ROIRouter(nn.Module):
     """

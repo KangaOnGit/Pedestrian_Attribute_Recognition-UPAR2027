@@ -2,7 +2,6 @@ from collections.abc import Sequence
 from typing import Literal, Protocol
 
 import torch
-from jaxtyping import Float, Int
 from torch import Tensor
 
 from pathlib import Path
@@ -11,10 +10,8 @@ class _YOLOBoxes(Protocol):
     xyxy: Tensor
     conf: Tensor
 
-
 class _YOLOResult(Protocol):
     boxes: _YOLOBoxes | None
-
 
 class _YOLOEModel(Protocol):
     def set_classes(self, classes: list[str]) -> object: ...
@@ -59,9 +56,9 @@ class YOLOEPromptBoxGenerator:
     @torch.inference_mode()
     def __call__(
         self,
-        images_rgb: Float[Tensor, "B 3 H W"],
+        images_rgb: Tensor,
         prompts: Sequence[str],
-    ) -> Float[Tensor, "B R 4"]:
+    ) -> Tensor:
 
         if self.prompt_mode == "one-pass":
             
@@ -72,7 +69,7 @@ class YOLOEPromptBoxGenerator:
                 device=str(images_rgb.device),
                 verbose=False,
             )
-            batch_boxes: list[Float[torch.Tensor, "R 4"]] = []
+            batch_boxes: list[torch.Tensor] = []
             for image_index, result in enumerate(results):
                 if result.boxes is None:
                     boxes = images_rgb.new_empty((0, 4))
@@ -85,14 +82,14 @@ class YOLOEPromptBoxGenerator:
                 batch_boxes.append(boxes)
 
             max_rois = max((boxes.shape[0] for boxes in batch_boxes), default=0)
-            padded: Float[torch.Tensor, "B Rmax 4"] = images_rgb.new_zeros(
+            padded: torch.Tensor = images_rgb.new_zeros(
                 (images_rgb.shape[0], max_rois, 4)
             )
             for batch_index, boxes in enumerate(batch_boxes):
                 padded[batch_index, : boxes.shape[0]] = boxes
             return padded
 
-        prompt_boxes: Float[torch.Tensor, "B R 4"] = images_rgb.new_zeros(
+        prompt_boxes: torch.Tensor = images_rgb.new_zeros(
             (images_rgb.shape[0], len(prompts), 4)
         )
         for prompt_index, prompt in enumerate(prompts):
@@ -107,12 +104,12 @@ class YOLOEPromptBoxGenerator:
                 if result.boxes is None:
                     continue
 
-                boxes: Float[torch.Tensor, "R 4"] = torch.as_tensor(
+                boxes: torch.Tensor = torch.as_tensor(
                     result.boxes.xyxy,
                     device=images_rgb.device,
                     dtype=images_rgb.dtype,
                 )
-                confidences: Float[torch.Tensor, "R"] = torch.as_tensor(
+                confidences: torch.Tensor = torch.as_tensor(
                     result.boxes.conf,
                     device=images_rgb.device,
                 )

@@ -12,7 +12,6 @@ from losses.aux_loss import aux_moe_loss
 from model.experts import ROIExpert
 from model.router import ROIRouter
 
-from jaxtyping import Bool, Float, Int
 from torchvision.ops import roi_align
 class SparseROIAttributeModel(nn.Module):
 
@@ -130,23 +129,14 @@ class SparseROIAttributeModel(nn.Module):
 
     def forward(
         self,
-        images_aug: Float[
-            torch.Tensor,
-            "B 3 H W",
-        ],
-        images_no_aug: Float[
-            torch.Tensor,
-            "B 3 H W",
-        ],
+        images_aug: torch.Tensor,
+        images_no_aug: torch.Tensor,
         roi_boxes: Tensor | None = None,
         *,
-        images_detector: Float[
-            torch.Tensor,
-            "B 3 Hd Wd",
-        ] | None = None,
+        images_detector: torch.Tensor | None = None,
     ) -> tuple[
-        Float[Tensor, "B K"],
-        Float[Tensor, ""],
+        Tensor,
+        Tensor,
     ]:
 
         batch_size = images_aug.shape[0]
@@ -168,7 +158,7 @@ class SparseROIAttributeModel(nn.Module):
                 )
             )
 
-        roi_boxes: Float[torch.Tensor, "B R 4"] = torch.as_tensor(
+        roi_boxes: torch.Tensor = torch.as_tensor(
             roi_boxes,
             device=images_no_aug.device,
             dtype=images_no_aug.dtype,
@@ -234,10 +224,10 @@ class SparseROIAttributeModel(nn.Module):
             )
         )
 
-        expert_features: Float[torch.Tensor, "B E*D"] = expert_features.flatten(1)
+        expert_features: torch.Tensor = expert_features.flatten(1)
 
         # [B,D] + [B,E*D]
-        fused_features: Float[torch.Tensor, "B E*D+D"] = torch.cat(
+        fused_features: torch.Tensor = torch.cat(
             (
                 image_features,
                 expert_features,
@@ -245,7 +235,7 @@ class SparseROIAttributeModel(nn.Module):
             dim=1,
         )
 
-        logits: Float[torch.Tensor, "B 40"] = self.classifier(
+        logits: torch.Tensor = self.classifier(
             fused_features
         )
 
@@ -253,25 +243,13 @@ class SparseROIAttributeModel(nn.Module):
 
     def _encode_rois(
         self,
-        feature_grid: Float[
-            torch.Tensor,
-            "B D Gh Gw",
-        ],
-        roi_boxes: Float[
-            torch.Tensor,
-            "B R 4",
-        ],
+        feature_grid: torch.Tensor,
+        roi_boxes: torch.Tensor,
         image_height: int,
         image_width: int,
     ) -> tuple[
-        Float[
-            torch.Tensor,
-            "B E D",
-        ],
-        Float[
-            torch.Tensor,
-            "",
-        ],
+        torch.Tensor,
+        torch.Tensor,
     ]:
 
         batch_size: int = feature_grid.shape[0]
@@ -286,10 +264,7 @@ class SparseROIAttributeModel(nn.Module):
 
         if num_rois == 0:
 
-            empty_expert_features: Float[
-                torch.Tensor,
-                "B E D",
-            ] = feature_grid.new_zeros(
+            empty_expert_features: torch.Tensor = feature_grid.new_zeros(
                 (
                     batch_size,
                     self.num_experts,
@@ -297,10 +272,7 @@ class SparseROIAttributeModel(nn.Module):
                 )
             )
 
-            empty_aux_loss: Float[
-                torch.Tensor,
-                "",
-            ] = feature_grid.new_zeros(())
+            empty_aux_loss: torch.Tensor = feature_grid.new_zeros(())
 
             return (
                 empty_expert_features,
@@ -315,10 +287,7 @@ class SparseROIAttributeModel(nn.Module):
         # [batch_idx, x1, y1, x2, y2]
         # =========================================================
 
-        boxes: Float[
-            torch.Tensor,
-            "B R 4",
-        ] = roi_boxes.to(
+        boxes: torch.Tensor = roi_boxes.to(
             device=device,
             dtype=dtype,
         )
@@ -334,74 +303,47 @@ class SparseROIAttributeModel(nn.Module):
             grid_height / image_height
         )
 
-        x1: Float[
-            torch.Tensor,
-            "B R",
-        ] = (
+        x1: torch.Tensor = (
             boxes[..., 0]
             * scale_x
         )
 
-        y1: Float[
-            torch.Tensor,
-            "B R",
-        ] = (
+        y1: torch.Tensor = (
             boxes[..., 1]
             * scale_y
         )
 
-        x2: Float[
-            torch.Tensor,
-            "B R",
-        ] = (
+        x2: torch.Tensor = (
             boxes[..., 2]
             * scale_x
         )
 
-        y2: Float[
-            torch.Tensor,
-            "B R",
-        ] = (
+        y2: torch.Tensor = (
             boxes[..., 3]
             * scale_y
         )
 
-        x1: Float[
-            torch.Tensor,
-            "B R",
-        ] = x1.clamp(
+        x1: torch.Tensor = x1.clamp(
             0,
             grid_width,
         )
 
-        x2: Float[
-            torch.Tensor,
-            "B R",
-        ] = x2.clamp(
+        x2: torch.Tensor = x2.clamp(
             0,
             grid_width,
         )
 
-        y1: Float[
-            torch.Tensor,
-            "B R",
-        ] = y1.clamp(
+        y1: torch.Tensor = y1.clamp(
             0,
             grid_height,
         )
 
-        y2: Float[
-            torch.Tensor,
-            "B R",
-        ] = y2.clamp(
+        y2: torch.Tensor = y2.clamp(
             0,
             grid_height,
         )
 
-        valid: Bool[
-            torch.Tensor,
-            "B R",
-        ] = (
+        valid: torch.Tensor = (
             (x2 > x1)
             & (y2 > y1)
         )
@@ -410,10 +352,7 @@ class SparseROIAttributeModel(nn.Module):
         # Flatten boxes
         # =========================================================
 
-        flat_boxes: Float[
-            torch.Tensor,
-            "B*R 4",
-        ] = torch.stack(
+        flat_boxes: torch.Tensor = torch.stack(
             (
                 x1,
                 y1,
@@ -426,10 +365,7 @@ class SparseROIAttributeModel(nn.Module):
             4,
         )
 
-        batch_indices: Int[
-            torch.Tensor,
-            "B*R",
-        ] = (
+        batch_indices: torch.Tensor = (
             torch.arange(
                 batch_size,
                 device=device,
@@ -443,15 +379,9 @@ class SparseROIAttributeModel(nn.Module):
             .reshape(-1)
         )
 
-        batch_indices_float: Float[
-            torch.Tensor,
-            "B*R",
-        ] = batch_indices.to(dtype)
+        batch_indices_float: torch.Tensor = batch_indices.to(dtype)
 
-        roi_boxes_with_batch: Float[
-            torch.Tensor,
-            "B*R 5",
-        ] = torch.cat(
+        roi_boxes_with_batch: torch.Tensor = torch.cat(
             (
                 batch_indices_float[:, None],
                 flat_boxes,
@@ -463,10 +393,7 @@ class SparseROIAttributeModel(nn.Module):
         # ROIAlign
         # =========================================================
 
-        roi_features_flat: Float[
-            torch.Tensor,
-            "B*R D Rh Rw",
-        ] = roi_align(
+        roi_features_flat: torch.Tensor = roi_align(
             input=feature_grid,
             boxes=roi_boxes_with_batch,
             output_size=self.roi_size,
@@ -478,10 +405,7 @@ class SparseROIAttributeModel(nn.Module):
         roi_height: int = self.roi_size[0]
         roi_width: int = self.roi_size[1]
 
-        roi_features: Float[
-            torch.Tensor,
-            "B R D Rh Rw",
-        ] = roi_features_flat.reshape(
+        roi_features: torch.Tensor = roi_features_flat.reshape(
             batch_size,
             num_rois,
             self.hidden_dim,
@@ -493,58 +417,37 @@ class SparseROIAttributeModel(nn.Module):
         # Geometry
         # =========================================================
 
-        x1_normalized: Float[
-            torch.Tensor,
-            "B R",
-        ] = (
+        x1_normalized: torch.Tensor = (
             boxes[..., 0]
             / image_width
         )
 
-        y1_normalized: Float[
-            torch.Tensor,
-            "B R",
-        ] = (
+        y1_normalized: torch.Tensor = (
             boxes[..., 1]
             / image_height
         )
 
-        x2_normalized: Float[
-            torch.Tensor,
-            "B R",
-        ] = (
+        x2_normalized: torch.Tensor = (
             boxes[..., 2]
             / image_width
         )
 
-        y2_normalized: Float[
-            torch.Tensor,
-            "B R",
-        ] = (
+        y2_normalized: torch.Tensor = (
             boxes[..., 3]
             / image_height
         )
 
-        width_normalized: Float[
-            torch.Tensor,
-            "B R",
-        ] = (
+        width_normalized: torch.Tensor = (
             boxes[..., 2]
             - boxes[..., 0]
         ) / image_width
 
-        height_normalized: Float[
-            torch.Tensor,
-            "B R",
-        ] = (
+        height_normalized: torch.Tensor = (
             boxes[..., 3]
             - boxes[..., 1]
         ) / image_height
 
-        normalized_geometry: Float[
-            torch.Tensor,
-            "B R 6",
-        ] = torch.stack(
+        normalized_geometry: torch.Tensor = torch.stack(
             (
                 x1_normalized,
                 y1_normalized,
@@ -564,64 +467,40 @@ class SparseROIAttributeModel(nn.Module):
             batch_size * num_rois
         )
 
-        roi_features: Float[
-            torch.Tensor,
-            "B*R D Rh Rw",
-        ] = roi_features.reshape(
+        roi_features: torch.Tensor = roi_features.reshape(
             num_flat_rois,
             self.hidden_dim,
             roi_height,
             roi_width,
         )
 
-        geometry: Float[
-            torch.Tensor,
-            "B*R 6",
-        ] = normalized_geometry.reshape(
+        geometry: torch.Tensor = normalized_geometry.reshape(
             num_flat_rois,
             6,
         )
 
-        valid_flat: Bool[
-            torch.Tensor,
-            "B*R",
-        ] = valid.reshape(-1)
+        valid_flat: torch.Tensor = valid.reshape(-1)
 
         # =========================================================
         # Router
         # =========================================================
 
-        routing_logits: Float[
-            torch.Tensor,
-            "B*R E",
-        ] = self.roi_router(
+        routing_logits: torch.Tensor = self.roi_router(
             roi_features,
             geometry,
         )
 
-        routing_probs: Float[
-            torch.Tensor,
-            "B*R E",
-        ] = F.softmax(
+        routing_probs: torch.Tensor = F.softmax(
             routing_logits,
             dim=-1,
         )
 
-        valid_float: Float[
-            torch.Tensor,
-            "B*R",
-        ] = valid_flat.to(dtype)
+        valid_float: torch.Tensor = valid_flat.to(dtype)
 
-        valid_float_expanded: Float[
-            torch.Tensor,
-            "B*R 1",
-        ] = valid_float[:, None]
+        valid_float_expanded: torch.Tensor = valid_float[:, None]
 
         # Invalid/padded ROIs should not contribute.
-        routing_probs: Float[
-            torch.Tensor,
-            "B*R E",
-        ] = (
+        routing_probs: torch.Tensor = (
             routing_probs
             * valid_float_expanded
         )
@@ -642,36 +521,21 @@ class SparseROIAttributeModel(nn.Module):
             )
         )
 
-        topk_weights: Float[
-            torch.Tensor,
-            "B*R K",
-        ] = topk_result.values
+        topk_weights: torch.Tensor = topk_result.values
 
-        topk_indices: Int[
-            torch.Tensor,
-            "B*R K",
-        ] = topk_result.indices
+        topk_indices: torch.Tensor = topk_result.indices
 
-        selected_weight_sum: Float[
-            torch.Tensor,
-            "B*R 1",
-        ] = topk_weights.sum(
+        selected_weight_sum: torch.Tensor = topk_weights.sum(
             dim=-1,
             keepdim=True,
         )
 
-        selected_weight_sum_safe: Float[
-            torch.Tensor,
-            "B*R 1",
-        ] = selected_weight_sum.clamp_min(
+        selected_weight_sum_safe: torch.Tensor = selected_weight_sum.clamp_min(
             1e-8
         )
 
         # Normalize only across selected experts.
-        topk_weights: Float[
-            torch.Tensor,
-            "B*R K",
-        ] = (
+        topk_weights: torch.Tensor = (
             topk_weights
             / selected_weight_sum_safe
         )
@@ -680,10 +544,7 @@ class SparseROIAttributeModel(nn.Module):
         # Run experts
         # =========================================================
 
-        encoded_rois: Float[
-            torch.Tensor,
-            "B*R D",
-        ] = roi_features.new_zeros(
+        encoded_rois: torch.Tensor = roi_features.new_zeros(
             (
                 num_flat_rois,
                 self.hidden_dim,
@@ -694,10 +555,7 @@ class SparseROIAttributeModel(nn.Module):
             self.roi_experts
         ):
 
-            selected: Bool[
-                torch.Tensor,
-                "B*R K",
-            ] = (
+            selected: torch.Tensor = (
                 topk_indices
                 == expert_idx
             )
@@ -707,17 +565,11 @@ class SparseROIAttributeModel(nn.Module):
             if not has_selected:
                 continue
 
-            roi_mask: Bool[
-                torch.Tensor,
-                "B*R",
-            ] = selected.any(
+            roi_mask: torch.Tensor = selected.any(
                 dim=-1
             )
 
-            roi_indices: Int[
-                torch.Tensor,
-                "N",
-            ] = (
+            roi_indices: torch.Tensor = (
                 roi_mask
                 .nonzero(
                     as_tuple=False,
@@ -725,31 +577,19 @@ class SparseROIAttributeModel(nn.Module):
                 .squeeze(-1)
             )
 
-            expert_input: Float[
-                torch.Tensor,
-                "N D Rh Rw",
-            ] = roi_features[
+            expert_input: torch.Tensor = roi_features[
                 roi_indices
             ]
 
-            expert_output: Float[
-                torch.Tensor,
-                "N D",
-            ] = expert(
+            expert_output: torch.Tensor = expert(
                 expert_input
             )
 
-            selected_for_rows: Bool[
-                torch.Tensor,
-                "N K",
-            ] = selected[
+            selected_for_rows: torch.Tensor = selected[
                 roi_indices
             ]
 
-            expert_weights: Float[
-                torch.Tensor,
-                "N",
-            ] = torch.zeros(
+            expert_weights: torch.Tensor = torch.zeros(
                 roi_indices.shape[0],
                 device=device,
                 dtype=dtype,
@@ -759,10 +599,7 @@ class SparseROIAttributeModel(nn.Module):
                 routing_k
             ):
 
-                selected_at_k: Bool[
-                    torch.Tensor,
-                    "N",
-                ] = selected_for_rows[
+                selected_at_k: torch.Tensor = selected_for_rows[
                     ...,
                     k_idx,
                 ]
@@ -770,10 +607,7 @@ class SparseROIAttributeModel(nn.Module):
                 if not selected_at_k.any():
                     continue
 
-                selected_weights: Float[
-                    torch.Tensor,
-                    "N",
-                ] = topk_weights[
+                selected_weights: torch.Tensor = topk_weights[
                     roi_indices,
                     k_idx,
                 ]
@@ -784,10 +618,7 @@ class SparseROIAttributeModel(nn.Module):
                     selected_at_k
                 ]
 
-            weighted_expert_output: Float[
-                torch.Tensor,
-                "N D",
-            ] = (
+            weighted_expert_output: torch.Tensor = (
                 expert_output
                 * expert_weights[:, None]
             )
@@ -800,10 +631,7 @@ class SparseROIAttributeModel(nn.Module):
         # Reshape back to [B, R, D]
         # =========================================================
 
-        encoded_rois: Float[
-            torch.Tensor,
-            "B R D",
-        ] = encoded_rois.reshape(
+        encoded_rois: torch.Tensor = encoded_rois.reshape(
             batch_size,
             num_rois,
             self.hidden_dim,
@@ -813,10 +641,7 @@ class SparseROIAttributeModel(nn.Module):
         # Aggregate ROI embeddings PER EXPERT
         # =========================================================
 
-        expert_features: Float[
-            torch.Tensor,
-            "B E D",
-        ] = feature_grid.new_zeros(
+        expert_features: torch.Tensor = feature_grid.new_zeros(
             (
                 batch_size,
                 self.num_experts,
@@ -824,29 +649,20 @@ class SparseROIAttributeModel(nn.Module):
             )
         )
 
-        expert_counts: Float[
-            torch.Tensor,
-            "B E",
-        ] = feature_grid.new_zeros(
+        expert_counts: torch.Tensor = feature_grid.new_zeros(
             (
                 batch_size,
                 self.num_experts,
             )
         )
 
-        routing_weights: Float[
-            torch.Tensor,
-            "B R K",
-        ] = topk_weights.reshape(
+        routing_weights: torch.Tensor = topk_weights.reshape(
             batch_size,
             num_rois,
             routing_k,
         )
 
-        routing_indices: Int[
-            torch.Tensor,
-            "B R K",
-        ] = topk_indices.reshape(
+        routing_indices: torch.Tensor = topk_indices.reshape(
             batch_size,
             num_rois,
             routing_k,
@@ -860,26 +676,17 @@ class SparseROIAttributeModel(nn.Module):
             routing_k
         ):
 
-            indices: Int[
-                torch.Tensor,
-                "B R",
-            ] = routing_indices[
+            indices: torch.Tensor = routing_indices[
                 ...,
                 k_idx,
             ]
 
-            weights: Float[
-                torch.Tensor,
-                "B R",
-            ] = routing_weights[
+            weights: torch.Tensor = routing_weights[
                 ...,
                 k_idx,
             ]
 
-            weights: Float[
-                torch.Tensor,
-                "B R",
-            ] = (
+            weights: torch.Tensor = (
                 weights
                 * valid.to(dtype)
             )
@@ -888,10 +695,7 @@ class SparseROIAttributeModel(nn.Module):
                 self.num_experts
             ):
 
-                mask: Bool[
-                    torch.Tensor,
-                    "B R",
-                ] = (
+                mask: torch.Tensor = (
                     indices
                     == expert_idx
                 )
@@ -899,23 +703,14 @@ class SparseROIAttributeModel(nn.Module):
                 if not mask.any():
                     continue
 
-                mask_float: Float[
-                    torch.Tensor,
-                    "B R",
-                ] = mask.to(dtype)
+                mask_float: torch.Tensor = mask.to(dtype)
 
-                weighted_assignment: Float[
-                    torch.Tensor,
-                    "B R",
-                ] = (
+                weighted_assignment: torch.Tensor = (
                     weights
                     * mask_float
                 )
 
-                weighted_features: Float[
-                    torch.Tensor,
-                    "B R D",
-                ] = (
+                weighted_features: torch.Tensor = (
                     encoded_rois
                     * weighted_assignment[
                         ...,
@@ -923,10 +718,7 @@ class SparseROIAttributeModel(nn.Module):
                     ]
                 )
 
-                aggregated_features: Float[
-                    torch.Tensor,
-                    "B D",
-                ] = weighted_features.sum(
+                aggregated_features: torch.Tensor = weighted_features.sum(
                     dim=1
                 )
 
@@ -935,10 +727,7 @@ class SparseROIAttributeModel(nn.Module):
                     expert_idx,
                 ] += aggregated_features
 
-                assignment_mass: Float[
-                    torch.Tensor,
-                    "B",
-                ] = weighted_assignment.sum(
+                assignment_mass: torch.Tensor = weighted_assignment.sum(
                     dim=1
                 )
 
@@ -951,25 +740,16 @@ class SparseROIAttributeModel(nn.Module):
         # Weighted mean instead of sum
         # =========================================================
 
-        expert_counts_expanded: Float[
-            torch.Tensor,
-            "B E 1",
-        ] = expert_counts[
+        expert_counts_expanded: torch.Tensor = expert_counts[
             ...,
             None,
         ]
 
-        expert_counts_safe: Float[
-            torch.Tensor,
-            "B E 1",
-        ] = expert_counts_expanded.clamp_min(
+        expert_counts_safe: torch.Tensor = expert_counts_expanded.clamp_min(
             1e-6
         )
 
-        expert_features: Float[
-            torch.Tensor,
-            "B E D",
-        ] = (
+        expert_features: torch.Tensor = (
             expert_features
             / expert_counts_safe
         )
@@ -978,33 +758,21 @@ class SparseROIAttributeModel(nn.Module):
         # Explicitly zero experts with no assignment
         # =========================================================
 
-        no_assignment: Bool[
-            torch.Tensor,
-            "B E",
-        ] = (
+        no_assignment: torch.Tensor = (
             expert_counts
             <= 1e-6
         )
 
-        no_assignment_expanded: Bool[
-            torch.Tensor,
-            "B E 1",
-        ] = no_assignment[
+        no_assignment_expanded: torch.Tensor = no_assignment[
             ...,
             None,
         ]
 
-        zero_expert_features: Float[
-            torch.Tensor,
-            "B E D",
-        ] = torch.zeros_like(
+        zero_expert_features: torch.Tensor = torch.zeros_like(
             expert_features
         )
 
-        expert_features: Float[
-            torch.Tensor,
-            "B E D",
-        ] = torch.where(
+        expert_features: torch.Tensor = torch.where(
             no_assignment_expanded,
             zero_expert_features,
             expert_features,
@@ -1014,17 +782,11 @@ class SparseROIAttributeModel(nn.Module):
         # Auxiliary MoE loss
         # =========================================================
 
-        valid_router_probs: Float[
-            torch.Tensor,
-            "N E",
-        ] = routing_probs[
+        valid_router_probs: torch.Tensor = routing_probs[
             valid_flat
         ]
 
-        valid_topk_indices: Int[
-            torch.Tensor,
-            "N K",
-        ] = topk_indices[
+        valid_topk_indices: torch.Tensor = topk_indices[
             valid_flat
         ]
 
@@ -1034,10 +796,7 @@ class SparseROIAttributeModel(nn.Module):
 
         if num_valid_rois > 0:
 
-            aux_loss: Float[
-                torch.Tensor,
-                "",
-            ] = aux_moe_loss(
+            aux_loss: torch.Tensor = aux_moe_loss(
                 router_probs=valid_router_probs,
                 expert_indices=valid_topk_indices,
                 num_experts=self.num_experts,
@@ -1045,10 +804,7 @@ class SparseROIAttributeModel(nn.Module):
 
         else:
 
-            aux_loss: Float[
-                torch.Tensor,
-                "",
-            ] = feature_grid.new_zeros(())
+            aux_loss: torch.Tensor = feature_grid.new_zeros(())
 
         return (
             expert_features,
@@ -1078,14 +834,14 @@ class SparseROIAttributeModel(nn.Module):
         
     def _crop_roi_features(
         self,
-        feature_grid: Float[Tensor, "B D Gh Gw"],
-        boxes: Float[Tensor, "B R 4"],
+        feature_grid: Tensor,
+        boxes: Tensor,
         image_height: int,
         image_width: int,
     ) -> tuple[
-        list[Float[Tensor, "D RH RW"]],
+        list[Tensor],
         list[tuple[int, int]],
-        Bool[Tensor, "B R"],
+        Tensor,
     ]:
         """
         Map detector-space ROI boxes to the DINO feature grid and
@@ -1112,7 +868,7 @@ class SparseROIAttributeModel(nn.Module):
         device: torch.device = feature_grid.device
         dtype: torch.dtype = feature_grid.dtype
 
-        boxes: Float[Tensor, "B R 4"] = boxes.to(
+        boxes: Tensor = boxes.to(
             device=device,
             dtype=dtype,
         )
@@ -1122,37 +878,37 @@ class SparseROIAttributeModel(nn.Module):
         scale_x: float = grid_width / image_width
         scale_y: float = grid_height / image_height
 
-        x1: Float[Tensor, "B R"] = boxes[..., 0] * scale_x
-        y1: Float[Tensor, "B R"] = boxes[..., 1] * scale_y
-        x2: Float[Tensor, "B R"] = boxes[..., 2] * scale_x
-        y2: Float[Tensor, "B R"] = boxes[..., 3] * scale_y
+        x1: Tensor = boxes[..., 0] * scale_x
+        y1: Tensor = boxes[..., 1] * scale_y
+        x2: Tensor = boxes[..., 2] * scale_x
+        y2: Tensor = boxes[..., 3] * scale_y
 
-        x1: Float[Tensor, "B R"] = x1.clamp(
+        x1: Tensor = x1.clamp(
             min=0,
             max=grid_width,
         )
 
-        x2: Float[Tensor, "B R"] = x2.clamp(
+        x2: Tensor = x2.clamp(
             min=0,
             max=grid_width,
         )
 
-        y1: Float[Tensor, "B R"] = y1.clamp(
+        y1: Tensor = y1.clamp(
             min=0,
             max=grid_height,
         )
 
-        y2: Float[Tensor, "B R"] = y2.clamp(
+        y2: Tensor = y2.clamp(
             min=0,
             max=grid_height,
         )
 
-        valid: Bool[Tensor, "B R"] = (
+        valid: Tensor = (
             (x2 > x1)
             & (y2 > y1)
         )
 
-        crops: list[Float[Tensor, "D RH RW"]] = []
+        crops: list[Tensor] = []
         locations: list[tuple[int, int]] = []
 
         for b in range(batch_size):
@@ -1161,7 +917,7 @@ class SparseROIAttributeModel(nn.Module):
             for r in range(num_rois):
                 roi_idx: int = r
 
-                roi_valid: Bool[Tensor, ""] = valid[
+                roi_valid: Tensor = valid[
                     batch_idx,
                     roi_idx,
                 ]
@@ -1169,39 +925,39 @@ class SparseROIAttributeModel(nn.Module):
                 if not roi_valid:
                     continue
 
-                left_float: Float[Tensor, ""] = x1[
+                left_float: Tensor = x1[
                     batch_idx,
                     roi_idx,
                 ]
 
-                top_float: Float[Tensor, ""] = y1[
+                top_float: Tensor = y1[
                     batch_idx,
                     roi_idx,
                 ]
 
-                right_float: Float[Tensor, ""] = x2[
+                right_float: Tensor = x2[
                     batch_idx,
                     roi_idx,
                 ]
 
-                bottom_float: Float[Tensor, ""] = y2[
+                bottom_float: Tensor = y2[
                     batch_idx,
                     roi_idx,
                 ]
 
-                left_floor: Float[Tensor, ""] = torch.floor(
+                left_floor: Tensor = torch.floor(
                     left_float,
                 )
 
-                top_floor: Float[Tensor, ""] = torch.floor(
+                top_floor: Tensor = torch.floor(
                     top_float,
                 )
 
-                right_ceil: Float[Tensor, ""] = torch.ceil(
+                right_ceil: Tensor = torch.ceil(
                     right_float,
                 )
 
-                bottom_ceil: Float[Tensor, ""] = torch.ceil(
+                bottom_ceil: Tensor = torch.ceil(
                     bottom_float,
                 )
 
@@ -1231,7 +987,7 @@ class SparseROIAttributeModel(nn.Module):
                     min(bottom, grid_height),
                 )
 
-                crop: Float[Tensor, "D RH RW"] = feature_grid[
+                crop: Tensor = feature_grid[
                     batch_idx,
                     :,
                     top:bottom,
@@ -1248,7 +1004,6 @@ class SparseROIAttributeModel(nn.Module):
                 locations.append(location)
 
         return crops, locations, valid
-
 
 __all__ = [
     "ConvFeatureEncoder",

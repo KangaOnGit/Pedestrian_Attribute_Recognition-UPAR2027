@@ -1,7 +1,6 @@
 from torch import Tensor, nn
 from model.feature_encoder import ConvFeatureEncoder
 
-
 class ROIExpert(nn.Module):
     """Processes ROIs routed to one expert."""
 
