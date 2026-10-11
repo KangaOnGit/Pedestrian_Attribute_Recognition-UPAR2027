@@ -1,0 +1,10 @@
+prompts: [
+    "face",
+    "hair",
+    "upper body",
+    "lower body",
+    "backpack",
+    "bag",
+    "glasses",
+    "hat",
+]
