@@ -231,3 +231,4 @@ MOCK_README.md
 vendor/
 wheels/
 *.safetensors
+vendor_linux/

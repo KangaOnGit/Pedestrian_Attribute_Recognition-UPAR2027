@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-VENDOR = ROOT / "vendor"
+VENDOR = ROOT / "vendor_linux"
 sys.path.insert(0, str(VENDOR))
 
 import logging
@@ -17,7 +17,12 @@ import yaml
 from PIL import Image, ImageFile
 from torch import Tensor, nn
 
-from model.roi_moe import SparseROIAttributeModel
+try:
+    from model.roi_moe import SparseROIAttributeModel
+except Exception:
+    import traceback
+    traceback.print_exc()
+    raise
 
 # ---------------------------------------------------------------------
 # Paths and inference configuration
@@ -30,7 +35,7 @@ WEIGHTS_PATH = ROOT / "best_challenge_avg.pt"
 
 IMAGE_SIZE = (128, 128)  # (height, width)
 NUM_CLASSES = 40
-BATCH_SIZE = 64
+BATCH_SIZE = 32
 
 MEAN = torch.tensor(
     [0.485, 0.456, 0.406],
@@ -358,7 +363,26 @@ def predict_batch(
     return results
 
 def predict_image(sample: dict[str, Any]) -> list[float]:
-    return predict_batch([sample])[0]
+    try:
+        result = predict_batch([sample])[0]
+
+        if len(result) != NUM_CLASSES:
+            raise ValueError(
+                f"Expected {NUM_CLASSES} probabilities, got {len(result)}"
+            )
+
+        if not all(np.isfinite(p) and 0.0 <= p <= 1.0 for p in result):
+            raise ValueError("Prediction contains invalid probabilities")
+
+        return result
+
+    except Exception:
+        LOGGER.exception(
+            "Prediction failed for index=%s, path=%s",
+            sample.get("index"),
+            sample.get("image_path"),
+        )
+        raise
 
 if __name__ == "__main__":
     import argparse
