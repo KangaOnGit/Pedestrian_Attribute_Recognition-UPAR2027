@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import inspect
 
 from jaxtyping import Float, Bool
-from transformers import Siglip2Tokenizer, AutoModel
+from transformers import AutoTokenizer, AutoModel
 from transformers.models.siglip.modeling_siglip import (
     create_bidirectional_mask,
 )
@@ -58,7 +58,7 @@ class TextEncoder(nn.Module):
         if ctx_len < 1:
             raise ValueError("ctx_len must be >= 1.")
 
-        self.tokenizer = Siglip2Tokenizer.from_pretrained(model_name)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         
         self.text_encoder = text_encoder
         self.embed_dim = self.text_encoder.get_input_embeddings().embedding_dim
