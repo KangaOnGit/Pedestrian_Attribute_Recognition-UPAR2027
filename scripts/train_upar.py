@@ -182,7 +182,7 @@ def validate_args(args: argparse.Namespace) -> None:
 
 
 def build_dataloaders(args: argparse.Namespace, device: torch.device):
-    from src.models.upar.upar_train.data import (
+    from src.models.archive.upar.upar_train.data import (
         DOMAIN_NAMES,
         PARDataset,
         PathResolver,
@@ -290,8 +290,8 @@ def build_model(args: argparse.Namespace, device: torch.device, n_domains: int):
             "Install the `clip` package before running train_upar.py."
         ) from exc
 
-    from src.models.upar.attributes import PART_OF_ATTR, PROMPT_PAIRS
-    from src.models.upar.model import PartCLIPPAR
+    from src.models.archive.upar.attributes import PART_OF_ATTR, PROMPT_PAIRS
+    from src.models.archive.upar.model import PartCLIPPAR
 
     clip_model, _ = clip.load(args.clip_model, device=device, jit=False)
     clip_model.float()
@@ -333,8 +333,8 @@ def train(
     wandb_run,
     log: logging.Logger,
 ) -> Path:
-    from src.models.upar.upar_train.losses import AsymmetricLoss
-    from src.models.upar.upar_train.metrics import par_metrics
+    from src.models.archive.upar.upar_train.losses import AsymmetricLoss
+    from src.models.archive.upar.upar_train.metrics import par_metrics
     from src.builders.optimizer import build_optimizer
     from src.train.scheduler import build_scheduler
 
