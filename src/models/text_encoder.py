@@ -9,6 +9,7 @@ from transformers.models.siglip.modeling_siglip import (
     create_bidirectional_mask,
 )
 from src.modules.self_attn import ClassSelfAttention
+from src.modules.visual_residual import VisualResidualGate
 class TextEncoder(nn.Module):
     """
     SigLIP 2 text encoder with configurable CoOp context.
@@ -43,7 +44,8 @@ class TextEncoder(nn.Module):
         hybrid: bool = False,
         category_ids: list[int] | None = None,
         debug: bool = False,
-        freeze_backbone: bool = False
+        freeze_backbone: bool = False,
+        condition_text: bool = False
     ):
         super().__init__()
 
@@ -96,7 +98,17 @@ class TextEncoder(nn.Module):
 
         self.prompts = prompts
         self.num_classes = len(prompts)
+        
         self.ctx_len = ctx_len
+        self.condition_text = condition_text
+        if condition_text:
+            self.visual_residual = VisualResidualGate(
+                shallow_dim=self.embed_dim,
+                ctx_len=self.ctx_len,
+                embed_dim=self.text_encoder.config.hidden_size,
+                debug=debug,
+            )
+            
         self.csc = csc
         self.hybrid = hybrid
         
@@ -276,33 +288,50 @@ class TextEncoder(nn.Module):
 
         return self.ctx[0]
 
+
     def forward(
         self,
-    ) -> Float[torch.Tensor, "num_classes E"]:
+        shallow_features: Float[torch.Tensor, "B shallow_dim"] | None = None,
+    ) -> Float[torch.Tensor, "B num_classes E"]:
+
+        if self.condition_text and shallow_features is None:
+            raise ValueError(
+                "shallow_features is required when condition_text=True."
+            )
 
         embedding_layer = self.text_encoder.embeddings
 
         token_ids = self.token_ids
         token_mask = self.token_mask
 
-        # E is embedding dimension
-        # Get embedding only
-        phrase_embeds: Float[torch.Tensor, "40, stored_len, E"] = embedding_layer.token_embedding(token_ids)
+        phrase_embeds: Float[torch.Tensor, "40 stored_len E"] = (
+            embedding_layer.token_embedding(token_ids)
+        )
         if self.debug:
             print(f"phrase_embeds shape: {phrase_embeds.shape}")
+
+        if self.condition_text:
+            B = shallow_features.shape[0]
+            visual_residuals: Float[torch.Tensor, "B ctx_len E"] = (
+                self.visual_residual(shallow_features).to(
+                    dtype=phrase_embeds.dtype,
+                    device=phrase_embeds.device,
+                )
+            )
+        else:
+            B = 1
 
         sequences = []
         attention_masks = []
         eos_positions = []
-        # Basically add ctx vectors to the embedded sentences
+
         for i in range(self.num_classes):
             length = int(self.token_lengths[i].item())
 
             ids = token_ids[i, :length]
             embeds = phrase_embeds[i, :length]
 
-            # Find leading special tokens, e.g. BOS if the tokenizer
-            # uses one, insert context after those tokens
+            # Find leading special tokens, e.g. BOS if present.
             special_mask = self.tokenizer.get_special_tokens_mask(
                 ids.tolist(),
                 already_has_special_tokens=True,
@@ -318,26 +347,44 @@ class TextEncoder(nn.Module):
             prefix = embeds[:prefix_len]
             text = embeds[prefix_len:]
 
-            context = self._get_context(i).to(
-                dtype=phrase_embeds.dtype
-            )
+            context = self._get_context(i).to(dtype=phrase_embeds.dtype)
 
-            # [prefix specials] + [learnable context] + [text and EOS]
-            combined = torch.cat(
-                [prefix, context, text],
-                dim=0,
-            )
+            if self.condition_text:
+                # [ctx_len, E] + [B, ctx_len, E] -> [B, ctx_len, E]
+                context = context.unsqueeze(0) + visual_residuals
 
-            combined_mask = torch.ones(
-                combined.shape[0],
+                # [B, prefix_len, E] + [B, ctx_len, E] + [B, text_len, E]
+                combined = torch.cat(
+                    [
+                        prefix.unsqueeze(0).expand(B, -1, -1),
+                        context,
+                        text.unsqueeze(0).expand(B, -1, -1),
+                    ],
+                    dim=1,
+                )
+            else:
+                # [prefix_len + ctx_len + text_len, E]
+                combined = torch.cat(
+                    [prefix, context, text],
+                    dim=0,
+                )
+
+            combined_mask: Bool[torch.Tensor, "... max_len"] = torch.ones(
+                combined.shape[:-1],
                 device=combined.device,
                 dtype=torch.bool,
             )
 
-            combined = combined[:self.max_len]
-            combined_mask = combined_mask[:self.max_len]
+            seq_dim = 1 if self.condition_text else 0
 
-            pad_length = self.max_len - combined.shape[0]
+            combined = combined.narrow(
+                seq_dim, 0, min(combined.shape[seq_dim], self.max_len)
+            )
+            combined_mask = combined_mask.narrow(
+                seq_dim, 0, min(combined_mask.shape[seq_dim], self.max_len)
+            )
+
+            pad_length = self.max_len - combined.shape[seq_dim]
 
             if pad_length > 0:
                 combined = F.pad(combined, (0, 0, 0, pad_length))
@@ -347,45 +394,73 @@ class TextEncoder(nn.Module):
                     value=False,
                 )
 
-            # EOS is at the end of the valid sequence when the
-            # tokenizer's standard special-token format ends in EOS.
-            eos_matches = (ids == self.eos_token_id).nonzero(
-                as_tuple=True
-            )[0]
-
+            eos_matches = (ids == self.eos_token_id).nonzero(as_tuple=True)[0]
             if eos_matches.numel() == 0:
                 raise ValueError(f"EOS token missing from prompt {i}")
 
             eos_pos = int(eos_matches[-1].item()) + self.ctx_len
 
             if eos_pos >= self.max_len:
-                raise ValueError(f"EOS position exceeds sequence length for prompt {i}")
+                raise ValueError(
+                    f"EOS position exceeds sequence length for prompt {i}"
+                )
 
             sequences.append(combined)
             attention_masks.append(combined_mask)
             eos_positions.append(eos_pos)
 
-        inputs_embeds: Float[torch.Tensor, "40 max_len E"] = torch.stack(sequences, dim=0)
-        attention_mask: Float[torch.Tensor, "40 max_len"] = torch.stack(attention_masks, dim=0)
+        if self.condition_text:
+            # [B, K, max_len, E]
+            inputs_embeds: Float[torch.Tensor, "B K max_len E"] = (
+                torch.stack(sequences, dim=1)
+            )
+            attention_mask: Bool[torch.Tensor, "B K max_len"] = (
+                torch.stack(attention_masks, dim=1)
+            )
+
+            # Flatten image and class dimensions for the text transformer.
+            inputs_embeds = inputs_embeds.reshape(
+                B * self.num_classes,
+                self.max_len,
+                phrase_embeds.shape[-1],
+            )
+            attention_mask = attention_mask.reshape(
+                B * self.num_classes,
+                self.max_len,
+            )
+        else:
+            # [K, max_len, E]
+            inputs_embeds: Float[torch.Tensor, "K max_len E"] = (
+                torch.stack(sequences, dim=0)
+            )
+            attention_mask: Bool[torch.Tensor, "K max_len"] = (
+                torch.stack(attention_masks, dim=0)
+            )
+
         if self.debug:
             print(f"inputs_embeds shape: {inputs_embeds.shape}")
-        
-        position_ids: Float[torch.Tensor, "40 max_len"] = torch.arange(
+
+        position_ids: torch.Tensor = torch.arange(
             self.max_len,
-            device=inputs_embeds.device,).unsqueeze(0).expand(self.num_classes, -1)
-        position_embeds: Float[torch.Tensor, "40 max_len E"] = embedding_layer.position_embedding(position_ids)
+            device=inputs_embeds.device,
+        ).unsqueeze(0).expand(inputs_embeds.shape[0], -1)
+
+        position_embeds: Float[torch.Tensor, "... max_len E"] = (
+            embedding_layer.position_embedding(position_ids)
+        )
+
         if self.debug:
             print(f"position_ids shape: {position_ids.shape}")
             print(f"position_embeds shape: {position_embeds.shape}")
-            
-        hidden_states: Float[torch.Tensor, "40 max_len E"] = inputs_embeds + position_embeds
-        
-        # Bidirectional so there's 2 max_len, 1 for forward and 1 for backward
-        attention_mask: Float[torch.Tensor, "40 1 max_len max_len"] = create_bidirectional_mask(
+
+        hidden_states = inputs_embeds + position_embeds
+
+        attention_mask = create_bidirectional_mask(
             config=self.text_encoder.config,
             inputs_embeds=hidden_states,
             attention_mask=attention_mask,
         )
+
         if self.debug:
             print(f"attention_mask bidirectional shape: {attention_mask.shape}")
 
@@ -394,34 +469,61 @@ class TextEncoder(nn.Module):
             device=inputs_embeds.device,
             dtype=torch.long,
         )
-        
+
         encoder_outputs = self.text_encoder.encoder(
             inputs_embeds=hidden_states,
             attention_mask=attention_mask,
         )
 
-        hidden_states: Float[torch.Tensor, "40 max_len E"] = self.text_encoder.final_layer_norm(
-            encoder_outputs.last_hidden_state
+        hidden_states: Float[torch.Tensor, "... max_len E"] = (
+            self.text_encoder.final_layer_norm(
+                encoder_outputs.last_hidden_state
+            )
         )
+
         if self.debug:
             print(f"hidden_states shape: {hidden_states.shape}")
-            
-        batch_indices: Float[torch.Tensor, "40"] = torch.arange(
-            self.num_classes,
-            device=hidden_states.device,
-        )
 
-        # get [EOS]/last hidden of every prompt
-        text_features: Float[torch.Tensor, "40 E"] = hidden_states[batch_indices, eos_positions]
-        text_features: Float[torch.Tensor, "40 E"] = self.text_encoder.head(text_features)
+        if self.condition_text:
+            hidden_states = hidden_states.reshape(
+                B,
+                self.num_classes,
+                self.max_len,
+                hidden_states.shape[-1],
+            )
+
+            batch_indices: torch.Tensor = torch.arange(
+                B, device=hidden_states.device
+            )[:, None]
+            class_indices: torch.Tensor = torch.arange(
+                self.num_classes, device=hidden_states.device
+            )[None, :]
+
+            text_features: Float[torch.Tensor, "B K E"] = hidden_states[
+                batch_indices,
+                class_indices,
+                eos_positions[None, :],
+            ]
+        else:
+            class_indices: torch.Tensor = torch.arange(
+                self.num_classes,
+                device=hidden_states.device,
+            )
+
+            text_features: Float[torch.Tensor, "K E"] = hidden_states[
+                class_indices, eos_positions
+            ]
+
+        text_features = text_features + self.class_attention(text_features)
         if self.debug:
             print(f"text_features shape: {text_features.shape}")
-            
-        out: Float[torch.Tensor, "40 E"] = text_features + self.class_attention(text_features)
+
+        out = self.text_encoder.head(text_features)
+
         if self.debug:
             print(f"out shape: {out.shape}")
-        return out
 
+        return out
 
 if __name__ == "__main__":
     from src.utils.config import load_config
@@ -435,7 +537,8 @@ if __name__ == "__main__":
         csc = False,
         hybrid = True,
         category_ids = P["category_ids"],
-        debug = True
+        debug = True,
+        condition_text = False,
     )
     print(inspect.getsource(te.text_encoder.embeddings.forward))
     print(inspect.getsource(te.text_encoder.forward))

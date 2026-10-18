@@ -6,18 +6,17 @@ import torch.nn.functional as F
 from jaxtyping import Float
 from transformers import Siglip2VisionModel, AutoModel
 from src.modules.shallow_cnn import ShallowCNN
-from src.modules.visual_residual import VisualResidualGate
 
 class VisionEncoder(nn.Module):
     """
     SigLIP2 vision encoder with a separate shallow CNN.
 
     Outputs:
-        image_features:   [B, Dv]
-        patch_features:   [B, N, Dv]
-        shallow_features: [B, Dv]
+        image_features:   [B, E]
+        patch_features:   [B, H, E]
+        shallow_features: [B, E]
 
-    Dv = vision hidden dimension, 1024 for SigLIP2-Large.
+    E = vision hidden dimension/embedding dim, 1024 for SigLIP2-Large.
     """
 
     def __init__(
@@ -50,7 +49,7 @@ class VisionEncoder(nn.Module):
     ) -> dict[str, torch.Tensor]:
 
         # shallow path
-        shallow_features: Float[torch.tensor, "B 40 E"] = self.shallow_cnn(images)
+        shallow_features: Float[torch.tensor, "B E"] = self.shallow_cnn(images)
         if self.debug:
             print(f"shallow_features shape: {shallow_features.shape}")
 
