@@ -6,9 +6,7 @@ import inspect
 
 from jaxtyping import Float, Bool
 from transformers import AutoTokenizer, AutoModel
-from transformers.models.siglip.modeling_siglip import (
-    create_bidirectional_mask,
-)
+from transformers.masking_utils import create_bidirectional_mask
 from src.modules.self_attn import ClassSelfAttention
 from src.modules.visual_residual import VisualResidualGate
 
