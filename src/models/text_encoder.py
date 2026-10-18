@@ -1,4 +1,3 @@
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -9,9 +8,7 @@ from transformers import Siglip2Tokenizer, AutoModel
 from transformers.models.siglip.modeling_siglip import (
     create_bidirectional_mask,
 )
-from src.modules.selfattn import ClassSelfAttention
-
-
+from src.modules.self_attn import ClassSelfAttention
 class TextEncoder(nn.Module):
     """
     SigLIP 2 text encoder with configurable CoOp context.
@@ -46,6 +43,7 @@ class TextEncoder(nn.Module):
         hybrid: bool = False,
         category_ids: list[int] | None = None,
         debug: bool = False,
+        freeze_backbone: bool = False
     ):
         super().__init__()
 
@@ -62,7 +60,7 @@ class TextEncoder(nn.Module):
         num_special = self.tokenizer.num_special_tokens_to_add(pair=False)
         
         self.class_attention = ClassSelfAttention(
-            embed_dim=1024,
+            embed_dim=self.embed_dim,
             num_heads=16,
             dropout=0.1,
         )
@@ -204,13 +202,13 @@ class TextEncoder(nn.Module):
                 "Not enough space for prompt and special tokens"
             )
 
-        token_ids: Float[torch.tensor, "40, stored_len"] = torch.full(
+        token_ids: Float[torch.Tensor, "40, stored_len"] = torch.full(
             (self.num_classes, stored_len),
             self.pad_token_id, # Fill with [PAD]
             dtype=torch.long,
         )
 
-        token_mask: Float[torch.tensor, "40, stored_len"] = torch.zeros(
+        token_mask: Float[torch.Tensor, "40, stored_len"] = torch.zeros(
             (self.num_classes, stored_len),
             dtype=torch.long,
         )
@@ -257,6 +255,10 @@ class TextEncoder(nn.Module):
                     encoded["input_ids"]
                 ),
             )
+            
+        if freeze_backbone:
+            for parameter in self.text_encoder.parameters():
+                parameter.requires_grad = False
     
     def _get_context(self, i: int) -> torch.Tensor:
         """Return the context for attribute i: [ctx_len, embed_dim]."""
@@ -276,7 +278,7 @@ class TextEncoder(nn.Module):
 
     def forward(
         self,
-    ) -> Float[torch.Tensor, "num_classes embed_dim"]:
+    ) -> Float[torch.Tensor, "num_classes E"]:
 
         embedding_layer = self.text_encoder.embeddings
 
@@ -285,7 +287,7 @@ class TextEncoder(nn.Module):
 
         # E is embedding dimension
         # Get embedding only
-        phrase_embeds: Float[torch.tensor, "40, stored_len, E"] = embedding_layer.token_embedding(token_ids)
+        phrase_embeds: Float[torch.Tensor, "40, stored_len, E"] = embedding_layer.token_embedding(token_ids)
         if self.debug:
             print(f"phrase_embeds shape: {phrase_embeds.shape}")
 
@@ -363,23 +365,23 @@ class TextEncoder(nn.Module):
             attention_masks.append(combined_mask)
             eos_positions.append(eos_pos)
 
-        inputs_embeds: Float[torch.tensor, "40 max_len E"] = torch.stack(sequences, dim=0)
-        attention_mask: Float[torch.tensor, "40 max_len"] = torch.stack(attention_masks, dim=0)
+        inputs_embeds: Float[torch.Tensor, "40 max_len E"] = torch.stack(sequences, dim=0)
+        attention_mask: Float[torch.Tensor, "40 max_len"] = torch.stack(attention_masks, dim=0)
         if self.debug:
             print(f"inputs_embeds shape: {inputs_embeds.shape}")
         
-        position_ids: Float[torch.tensor, "40 max_len"] = torch.arange(
+        position_ids: Float[torch.Tensor, "40 max_len"] = torch.arange(
             self.max_len,
             device=inputs_embeds.device,).unsqueeze(0).expand(self.num_classes, -1)
-        position_embeds: Float[torch.tensor, "40 max_len E"] = embedding_layer.position_embedding(position_ids)
+        position_embeds: Float[torch.Tensor, "40 max_len E"] = embedding_layer.position_embedding(position_ids)
         if self.debug:
             print(f"position_ids shape: {position_ids.shape}")
             print(f"position_embeds shape: {position_embeds.shape}")
             
-        hidden_states: Float[torch.tensor, "40 max_len E"] = inputs_embeds + position_embeds
+        hidden_states: Float[torch.Tensor, "40 max_len E"] = inputs_embeds + position_embeds
         
         # Bidirectional so there's 2 max_len, 1 for forward and 1 for backward
-        attention_mask: Float[torch.tensor, "40 1 max_len max_len"] = create_bidirectional_mask(
+        attention_mask: Float[torch.Tensor, "40 1 max_len max_len"] = create_bidirectional_mask(
             config=self.text_encoder.config,
             inputs_embeds=hidden_states,
             attention_mask=attention_mask,
@@ -398,24 +400,24 @@ class TextEncoder(nn.Module):
             attention_mask=attention_mask,
         )
 
-        hidden_states: Float[torch.tensor, "40 max_len E"] = self.text_encoder.final_layer_norm(
+        hidden_states: Float[torch.Tensor, "40 max_len E"] = self.text_encoder.final_layer_norm(
             encoder_outputs.last_hidden_state
         )
         if self.debug:
             print(f"hidden_states shape: {hidden_states.shape}")
             
-        batch_indices: Float[torch.tensor, "40"] = torch.arange(
+        batch_indices: Float[torch.Tensor, "40"] = torch.arange(
             self.num_classes,
             device=hidden_states.device,
         )
 
         # get [EOS]/last hidden of every prompt
-        text_features: Float[torch.tensor, "40 E"] = hidden_states[batch_indices, eos_positions]
-        text_features: Float[torch.tensor, "40 E"] = self.text_encoder.head(text_features)
+        text_features: Float[torch.Tensor, "40 E"] = hidden_states[batch_indices, eos_positions]
+        text_features: Float[torch.Tensor, "40 E"] = self.text_encoder.head(text_features)
         if self.debug:
             print(f"text_features shape: {text_features.shape}")
             
-        out: Float[torch.tensor, "40 E"] = text_features + self.class_attention(text_features)
+        out: Float[torch.Tensor, "40 E"] = text_features + self.class_attention(text_features)
         if self.debug:
             print(f"out shape: {out.shape}")
         return out
