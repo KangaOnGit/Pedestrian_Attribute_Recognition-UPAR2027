@@ -129,7 +129,6 @@ class Trainer:
         self.scheduler: optim.lr_scheduler.SequentialLR = build_scheduler(
             self.optimizer,
             self.epochs,
-            lr,
         )
         # ------------------------------------------
 
@@ -206,7 +205,7 @@ class Trainer:
     def train_epoch(
         self,
         epoch: int,
-    ) -> float:
+    ) -> tuple[float, float]:
         self.model.train()
 
         total_loss: float = 0.0

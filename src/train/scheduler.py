@@ -1,4 +1,6 @@
 
+import math
+
 from torch.optim import Optimizer
 
 import torch.optim as optim
@@ -6,7 +8,6 @@ import torch.optim as optim
 def build_scheduler(
     optimizer: Optimizer,
     num_epochs: int,
-    lr: float,
 ) -> optim.lr_scheduler.SequentialLR:
 
     if num_epochs < 1:
@@ -23,10 +24,13 @@ def build_scheduler(
         total_iters=warmup_epochs,
     )
 
-    decay = optim.lr_scheduler.CosineAnnealingLR(
+    decay_epochs = max(1, num_epochs - warmup_epochs)
+    decay = optim.lr_scheduler.LambdaLR(
         optimizer,
-        T_max=max(1, num_epochs - warmup_epochs),
-        eta_min=lr * 0.01,
+        lr_lambda=lambda epoch: 0.01
+        + 0.99
+        * (1 + math.cos(math.pi * min(epoch, decay_epochs) / decay_epochs))
+        / 2,
     )
 
     schedule = optim.lr_scheduler.SequentialLR(

@@ -341,7 +341,7 @@ def train(
     model.to(device)
     criterion = AsymmetricLoss().to(device)
     optimizer = build_optimizer(model, args.optimizer, args.lr, args.weight_decay)
-    scheduler = build_scheduler(optimizer, args.epochs, args.lr)
+    scheduler = build_scheduler(optimizer, args.epochs)
     output_dir.mkdir(parents=True, exist_ok=True)
     result_path = output_dir / "upar_train_results.csv"
     columns = (

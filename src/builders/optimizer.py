@@ -27,7 +27,14 @@ def build_optimizer(
         parameter
         for name, parameter in model.named_parameters()
         if parameter.requires_grad
-        and name.startswith(("backbone.model.", "image_backbone.model."))
+        and name.startswith(
+            (
+                "backbone.model.",
+                "image_backbone.model.",
+                "siglip2.text_model.",
+                "siglip2.vision_model.",
+            )
+        )
     ]
     backbone_parameter_ids = {id(parameter) for parameter in backbone_parameters}
     head_parameters = [

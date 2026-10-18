@@ -81,7 +81,7 @@ class CCA_NET(nn.Module):
                 dim=-1,
                 eps=1e-6,
             )
-        return matching
+        return matching * self.siglip2.logit_scale.exp() + self.siglip2.logit_bias
         
 if __name__ == "__main__":
     import torch
