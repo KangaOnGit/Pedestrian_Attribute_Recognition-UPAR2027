@@ -1,7 +1,6 @@
 from src.builders.augmentation import build_augmentation_flags
 from src.train.load_data import UPAR_dataset
 from src.utils.config import load_config, resolve_path
-from src.models.upar.vision import CLIP_MEAN, CLIP_STD
 from torch.utils.data import DataLoader
 
 CONFIG = load_config("configs/train.yaml")
@@ -18,11 +17,20 @@ def build_dataloaders(args,
 
     train_aug_flags = build_augmentation_flags(TRAIN_AUGMENTATION)
     eval_aug_flags = build_augmentation_flags(EVAL_AUGMENTATION)
-    normalization = (
-        {"normalization_mean": CLIP_MEAN, "normalization_std": CLIP_STD}
-        if args.architecture == "upar"
-        else {}
-    )
+    if args.architecture == "upar":
+        from src.models.upar.vision import CLIP_MEAN, CLIP_STD
+
+        normalization = {
+            "normalization_mean": CLIP_MEAN,
+            "normalization_std": CLIP_STD,
+        }
+    elif args.architecture == "cca":
+        normalization = {
+            "normalization_mean": (0.5, 0.5, 0.5),
+            "normalization_std": (0.5, 0.5, 0.5),
+        }
+    else:
+        normalization = {}
 
     train_dataset = UPAR_dataset(
         data_path=str(resolve_path(args.train_csv)),

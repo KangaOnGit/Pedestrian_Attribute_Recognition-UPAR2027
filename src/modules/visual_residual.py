@@ -1,7 +1,10 @@
 
+import logging
 import torch
 import torch.nn as nn
 from jaxtyping import Float
+
+log = logging.getLogger(__name__)
 
 class VisualResidualGate(nn.Module):
     def __init__(
@@ -41,11 +44,11 @@ class VisualResidualGate(nn.Module):
         visual: Float[torch.Tensor, "B ctx_len E"] = visual.reshape(B, self.ctx_len, self.embed_dim)
         gate : Float[torch.Tensor, "B ctx_len E"]= gate.reshape(B, self.ctx_len, self.embed_dim)
         if self.debug:
-            print(f"visual shape: {visual.shape}")
-            print(f"gate shape: {gate.shape}")
+            log.debug("visual shape: %s", visual.shape)
+            log.debug("gate shape: %s", gate.shape)
 
         residual: Float[torch.Tensor, "B ctx_len E"] = self.alpha * gate * visual
         if self.debug:
-            print(f"residual shape: {residual.shape}")
+            log.debug("residual shape: %s", residual.shape)
 
         return residual

@@ -18,8 +18,7 @@ from src.utils.seed import set_seed
 from src.utils.wb import init_wandb
 from src.utils.config import resolve_path
 
-from src.models.feature_encoder import ImageAttributeModel
-from src.models.roi_moe import SparseROIAttributeModel
+from src.models.cca_net import CCA_NET
 
 
 TRAIN_CONFIG = load_config("configs/train.yaml")
@@ -32,7 +31,8 @@ DEFAULT_DATASET = TRAIN_CONFIG["data"].get("data_name")
 if DEFAULT_DATASET == "None":
     DEFAULT_DATASET = None
     
-PROMPTS = load_config("configs/prompts.yaml")["prompts"]
+PROMPTS_CONFIG = load_config("configs/prompts.yaml")
+PROMPTS = PROMPTS_CONFIG["prompts"]
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -85,10 +85,10 @@ def parse_args() -> argparse.Namespace:
     
     parser.add_argument(
         "--architecture",
-        choices=("image", "roi_moe"),
-        default="roi_moe",
+        choices=("image", "roi_moe", "cca"),
+        default="cca",
         help=(
-            "Choose the image model or prompted ROI mixture-of-experts."
+            "Choose the image model, prompted ROI mixture-of-experts, or CCA-Net."
         ),
     )
     parser.add_argument(
@@ -100,7 +100,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--finetune-backbone",
         action="store_true",
-        help="Fine-tune DINOv3 instead of keeping its pretrained weights frozen.",
+        help="Fine-tune the pretrained model backbone instead of keeping it frozen.",
     )
     parser.add_argument(
         "--roi-generator",
@@ -133,6 +133,34 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=2,
         help="Number of ROI experts selected per ROI.",
+    )
+    parser.add_argument(
+        "--cca-model-name",
+        default="google/siglip2-large-patch16-256",
+        help="Hugging Face SigLIP2 model used by CCA-Net.",
+    )
+    parser.add_argument(
+        "--ctx-len",
+        type=int,
+        default=16,
+        help="Number of learned context tokens used by CCA-Net.",
+    )
+    parser.add_argument(
+        "--context-mode",
+        choices=("shared", "csc", "hybrid"),
+        default="hybrid",
+        help="Learned text context parameterization used by CCA-Net.",
+    )
+    parser.add_argument(
+        "--condition-text",
+        action="store_true",
+        help="Condition CCA-Net text context on shallow visual features.",
+    )
+    parser.add_argument(
+        "--shallow-hidden-dim",
+        type=int,
+        default=128,
+        help="Hidden dimension of CCA-Net's shallow visual encoder.",
     )
     # Training
     parser.add_argument(
@@ -316,10 +344,14 @@ def validate_args(args):
     if args.weight_decay < 0:
         raise SystemExit("--weight-decay cannot be negative")
 
-    if args.architecture != "roi_moe" and args.roi_generator != "none":
+    if args.architecture == "image" and args.roi_generator != "none":
         raise SystemExit("--roi-generator can only be used with --architecture=roi_moe")
 
-    if args.finetune_backbone and args.backbone != "dinov3":
+    if (
+        args.finetune_backbone
+        and args.architecture != "cca"
+        and args.backbone != "dinov3"
+    ):
         raise SystemExit("--finetune-backbone requires --backbone=dinov3")
 
     if args.hidden_dim is not None and args.hidden_dim < 1:
@@ -330,6 +362,16 @@ def validate_args(args):
             raise SystemExit("--num-experts must be at least 1")
         if not 1 <= args.roi_top_k <= args.num_experts:
             raise SystemExit("--roi-top-k must be between 1 and --num-experts")
+
+    if args.architecture == "cca":
+        if args.ctx_len < 1:
+            raise SystemExit("--ctx-len must be at least 1")
+        if args.shallow_hidden_dim < 1:
+            raise SystemExit("--shallow-hidden-dim must be at least 1")
+        if args.context_mode == "hybrid" and not PROMPTS_CONFIG.get("category_ids"):
+            raise SystemExit(
+                "CCA-Net hybrid context requires category_ids in configs/prompts.yaml"
+            )
 
 
 def main():
@@ -391,6 +433,8 @@ def main():
     # Model
     log.info("Loading model...")
     if args.architecture == "image":
+        from src.models.archive.feature_encoder import ImageAttributeModel
+
         model = ImageAttributeModel(
             num_classes=num_attributes,
             hidden_dim=args.hidden_dim if args.hidden_dim is not None else 256,
@@ -398,6 +442,8 @@ def main():
             backbone_trainable=args.finetune_backbone,
         )
     elif args.architecture == "roi_moe":
+        from src.models.archive.roi_moe import SparseROIAttributeModel
+
         model = SparseROIAttributeModel(
             num_classes=num_attributes,
             hidden_dim=args.hidden_dim if args.hidden_dim is not None else 128,
@@ -408,6 +454,27 @@ def main():
             yoloe_prompt_mode=args.yoloe_prompt_mode,
             image_backbone_type=args.backbone,
             dinov3_trainable=args.finetune_backbone,
+        )
+    elif args.architecture == "cca":
+        if len(PROMPTS) != num_attributes:
+            raise ValueError(
+                f"CCA-Net requires one prompt per attribute; got {len(PROMPTS)} "
+                f"prompts for {num_attributes} attributes."
+            )
+        model = CCA_NET(
+            model_name=args.cca_model_name,
+            prompts=PROMPTS,
+            ctx_len=args.ctx_len,
+            csc=args.context_mode == "csc",
+            hybrid=args.context_mode == "hybrid",
+            category_ids=(
+                PROMPTS_CONFIG.get("category_ids")
+                if args.context_mode == "hybrid"
+                else None
+            ),
+            condition_text=args.condition_text,
+            freeze_backbone=not args.finetune_backbone,
+            shallow_hidden_dim=args.shallow_hidden_dim,
         )
     # W&B
     wandb_run = None

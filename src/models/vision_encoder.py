@@ -1,11 +1,13 @@
 
+import logging
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from jaxtyping import Float
-from transformers import Siglip2VisionModel, AutoModel
+from transformers import AutoModel
 from src.modules.shallow_cnn import ShallowCNN
+
+log = logging.getLogger(__name__)
 
 class VisionEncoder(nn.Module):
     """
@@ -21,7 +23,7 @@ class VisionEncoder(nn.Module):
 
     def __init__(
         self,
-        vision_encoder: Siglip2VisionModel,
+        vision_encoder: nn.Module,
         freeze_backbone: bool = True,
         shallow_hidden_dim: int = 128,
         shallow_out_dim: int = 1024,
@@ -44,30 +46,25 @@ class VisionEncoder(nn.Module):
     def forward(
         self,
         images: Float[torch.Tensor, "B 3 H W"],
-        pixel_attention_mask: torch.Tensor | None = None,
-        spatial_shapes: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
 
         # shallow path
         shallow_features: Float[torch.tensor, "B E"] = self.shallow_cnn(images)
         if self.debug:
-            print(f"shallow_features shape: {shallow_features.shape}")
+            log.debug("shallow_features shape: %s", shallow_features.shape)
 
-        # deep path
         outputs = self.vision_encoder(
             pixel_values=images,
-            pixel_attention_mask=pixel_attention_mask,
-            spatial_shapes=spatial_shapes,
             return_dict=True,
         )
 
         patch_features: Float[torch.tensor, "B H E"] = outputs.last_hidden_state
         if self.debug:
-            print(f"patch_features shape: {patch_features.shape}")
+            log.debug("patch_features shape: %s", patch_features.shape)
 
         image_features: Float[torch.tensor, "B E"] = outputs.pooler_output
         if self.debug:
-            print(f"image_features shape: {image_features.shape}")
+            log.debug("image_features shape: %s", image_features.shape)
 
         return {
             "image_features": image_features,
@@ -76,6 +73,7 @@ class VisionEncoder(nn.Module):
         }
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.DEBUG)
     ve = VisionEncoder(
         vision_encoder = AutoModel.from_pretrained("google/siglip2-large-patch16-256").vision_model,
         freeze_backbone = False,

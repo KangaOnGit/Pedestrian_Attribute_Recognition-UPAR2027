@@ -10,6 +10,7 @@
         └── runtime.json          metadata, hiệu chuẩn, prior (tỉ lệ dương trên tập train; dùng khi phải fallback)
 """
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -20,6 +21,8 @@ import zipfile
 from pathlib import Path
 
 import numpy as np
+
+log = logging.getLogger(__name__)
 
 EXCLUDE_DIRS = {"__pycache__", ".git"}
 EXCLUDE_FILES = {".DS_Store"}
@@ -45,7 +48,11 @@ def export_submission(model, tfeat, calib, cfg, sub_dir, project_root, metadata_
     sub_dir, project_root = Path(sub_dir), Path(project_root)
     if sub_dir.exists() and any(sub_dir.iterdir()) and not (sub_dir / "run.py").exists():
         child = sub_dir / "my_submission"                      # trỏ nhầm vào thư mục đang chứa file khác (vd. /kaggle/working)
-        print("[export] %s đang chứa file khác -> dùng thư mục con %s" % (sub_dir, child))
+        log.info(
+            "[export] %s đang chứa file khác -> dùng thư mục con %s",
+            sub_dir,
+            child,
+        )
         sub_dir = child
         if sub_dir.exists() and any(sub_dir.iterdir()) and not (sub_dir / "run.py").exists():
             raise RuntimeError("%s đã tồn tại và không phải thư mục bài nộp cũ; chọn cfg.submission_dir khác." % sub_dir)
@@ -77,8 +84,14 @@ def export_submission(model, tfeat, calib, cfg, sub_dir, project_root, metadata_
             shutil.copy(cand, sub_dir / "metadata.yaml")                                   # copy nguyên vẹn, không sửa
             break
     size = sum(f.stat().st_size for f in sub_dir.rglob("*") if f.is_file()) / 2 ** 20
-    print("[export] đã ghi %s (%.0f MiB) | metadata.yaml: %s" % (sub_dir, size, "có" if (sub_dir / "metadata.yaml").exists()
-                                                                  else "CHƯA CÓ — hãy copy từ example submission"))
+    log.info(
+        "[export] đã ghi %s (%.0f MiB) | metadata.yaml: %s",
+        sub_dir,
+        size,
+        "có"
+        if (sub_dir / "metadata.yaml").exists()
+        else "CHƯA CÓ — hãy copy từ example submission",
+    )
     return sub_dir
 
 
@@ -90,7 +103,10 @@ def zip_submission(sub_dir, zip_path):
     if "run.py" in problems:
         raise FileNotFoundError("Thiếu run.py ở gốc %s" % sub_dir)
     if problems:
-        print("[zip] CẢNH BÁO: thiếu %s — nền tảng yêu cầu file này ở gốc zip." % ", ".join(problems))
+        log.warning(
+            "[zip] CẢNH BÁO: thiếu %s — nền tảng yêu cầu file này ở gốc zip.",
+            ", ".join(problems),
+        )
     if zip_path.exists():
         zip_path.unlink()
     zip_path.parent.mkdir(parents=True, exist_ok=True)
@@ -104,8 +120,13 @@ def zip_submission(sub_dir, zip_path):
                 full = Path(root) / f
                 zf.write(full, arcname=full.relative_to(sub_dir).as_posix())
                 n += 1
-    print("[zip] %s: %d file, %.0f MiB | run.py ở gốc: %s" % (zip_path, n, zip_path.stat().st_size / 2 ** 20,
-                                                              "run.py" in zipfile.ZipFile(zip_path).namelist()))
+    log.info(
+        "[zip] %s: %d file, %.0f MiB | run.py ở gốc: %s",
+        zip_path,
+        n,
+        zip_path.stat().st_size / 2 ** 20,
+        "run.py" in zipfile.ZipFile(zip_path).namelist(),
+    )
     return zip_path
 
 
@@ -114,8 +135,10 @@ def zip_submission(sub_dir, zip_path):
 # các gói không có trong môi trường chấm (clip, ftfy, regex, torchvision, ...) để chắc chắn bài nộp tự chứa.
 # ------------------------------------------------------------------------------------------------
 _INGEST_SIM = r'''
-import sys, os, json, time
+import sys, os, json, time, logging
 import numpy as np
+logging.basicConfig(stream=sys.stdout, level=logging.INFO)
+log = logging.getLogger("upar.ingest_sim")
 for m in ("clip", "ftfy", "regex", "torchvision", "open_clip", "timm", "huggingface_hub", "upar_train"):
     sys.modules[m] = None                        # import sẽ báo ImportError nếu bài nộp lỡ phụ thuộc vào chúng
 paths = json.load(open(sys.argv[1])); out = sys.argv[2]
@@ -150,7 +173,16 @@ for i in range(0, len(paths), bs):
 dt = time.time() - t1
 np.save(out, np.asarray(rows, dtype=np.float32))
 ms = 1000 * dt / max(1, len(paths))
-print("[ingest-sim] %d ảnh | nạp mô hình %.1fs | suy luận %.1fs (%.1f ms/ảnh, batch=%d) | ước lượng 29248 ảnh: %.0f phút" % (len(paths), t_load, dt, ms, bs, ms * 29248 / 60000.0))
+log.info(
+    "[ingest-sim] %d ảnh | nạp mô hình %.1fs | suy luận %.1fs "
+    "(%.1f ms/ảnh, batch=%d) | ước lượng 29248 ảnh: %.0f phút",
+    len(paths),
+    t_load,
+    dt,
+    ms,
+    bs,
+    ms * 29248 / 60000.0,
+)
 '''
 
 
@@ -166,10 +198,15 @@ def run_ingestion_sim(sub_dir, image_paths, timeout=None, extra_env=None, python
         env.update(extra_env or {})
         r = subprocess.run([python or sys.executable, str(script), str(lst), str(out)], cwd=str(sub_dir), env=env,
                            capture_output=True, text=True, timeout=timeout)
-        print((r.stdout or "").strip())
+        if r.stdout and r.stdout.strip():
+            log.info("%s", r.stdout.strip())
         err_lines = [l for l in (r.stderr or "").strip().splitlines() if l.startswith(("[upar]", "[run.py]"))]
         if err_lines:
-            print("--- log của run.py (stderr, %d dòng cuối) ---\n%s" % (min(len(err_lines), 12), "\n".join(err_lines[-12:])))
+            log.warning(
+                "--- log của run.py (stderr, %d dòng cuối) ---\n%s",
+                min(len(err_lines), 12),
+                "\n".join(err_lines[-12:]),
+            )
         if r.returncode != 0:
             raise RuntimeError("Mô phỏng ingestion LỖI:\n" + (r.stderr or "")[-2500:])
         return np.load(out)

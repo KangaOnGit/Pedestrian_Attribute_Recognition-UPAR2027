@@ -86,6 +86,17 @@ Use `--backbone conv` for a convolutional encoder trained from scratch. Use
 `--finetune-backbone` to fine-tune DINOv3; otherwise, its pretrained model
 weights are frozen.
 
+### CCA-Net with SigLIP2
+
+The `cca` architecture trains `CCA_NET` with the attribute prompts and category
+IDs in `configs/prompts.yaml`. It passes the augmented tensor directly to the
+SigLIP2 vision encoder (without an image processor); the training data pipeline
+resizes and normalizes RGB pixels to the SigLIP2 range. The default text
+parameterization is hybrid category/class context with 16 learned tokens, and
+the pretrained text and vision backbones remain frozen unless
+`--finetune-backbone` is supplied. Use `--condition-text` to condition learned
+text context on shallow visual features.
+
 ### Prompted ROI mixture of experts
 
 The `roi_moe` architecture is motivated by the risk that evidence from small
@@ -255,6 +266,23 @@ python scripts/train.py \
   --output-dir outputs/roi_moe
 ```
 
+Train CCA-Net with SigLIP2:
+
+```bash
+python scripts/train.py \
+  --train-csv data/annotations/train.csv \
+  --val-csv data/annotations/val.csv \
+  --architecture cca \
+  --cca-model-name google/siglip2-large-patch16-256 \
+  --batch-size 128 \
+  --epochs 5 \
+  --lr 0.002 \
+  --weight-decay 1e-5 \
+  --optimizer adamw \
+  --loss focal \
+  --output-dir outputs/cca
+```
+
 Train the UPAR model with its dedicated training script:
 
 ```bash
@@ -286,7 +314,8 @@ The ROI hyperparameters are configurable:
 `--hidden` aliases `--hidden-dim`. `--yoloe-prompt-mode` accepts `loop`
 (default) or `one-pass`; it applies only when `--roi-generator yoloe`. The
 default hidden dimensions are 256 for `image` and 128 for `roi_moe`. Run
-`python scripts/train.py --help` to see image/ROI training options.
+`python scripts/train.py --help` to see image, ROI, and CCA-Net training
+options.
 
 Other useful options:
 

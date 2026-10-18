@@ -1,3 +1,4 @@
+import logging
 import torch
 import torch.nn as nn
 
@@ -6,6 +7,8 @@ from src.models.vision_encoder import VisionEncoder
 from src.modules.visual_residual import VisualResidualGate
 from transformers import AutoModel
 from jaxtyping import Float
+
+log = logging.getLogger(__name__)
 
 class CCA_NET(nn.Module):
     def __init__(self,
@@ -83,6 +86,8 @@ class CCA_NET(nn.Module):
 if __name__ == "__main__":
     import torch
 
+    logging.basicConfig(level=logging.DEBUG)
+
     # Configuration
     MODEL_NAME = "google/siglip2-large-patch16-256"
     BATCH_SIZE = 3
@@ -99,10 +104,10 @@ if __name__ == "__main__":
     device = torch.device(
         "cuda" if torch.cuda.is_available() else "cpu"
     )
-    print(f"Device: {device}")
+    log.info("Device: %s", device)
 
     for condition_text in [False, True]:
-        print(f"\nTesting condition_text={condition_text}")
+        log.info("Testing condition_text=%s", condition_text)
 
         model = CCA_NET(
             model_name=MODEL_NAME,
@@ -128,19 +133,19 @@ if __name__ == "__main__":
             with torch.no_grad():
                 output = model(images)
 
-            print(f"Output shape: {output.shape}")
-            print(f"Output dtype: {output.dtype}")
-            print(f"Output device: {output.device}")
-            print(f"All finite: {torch.isfinite(output).all().item()}")
+            log.info("Output shape: %s", output.shape)
+            log.info("Output dtype: %s", output.dtype)
+            log.info("Output device: %s", output.device)
+            log.info("All finite: %s", torch.isfinite(output).all().item())
 
             assert output.shape == (BATCH_SIZE, 40), (
                 f"Expected {(BATCH_SIZE, 40)}, got {output.shape}"
             )
 
-            print("Forward pass passed.")
+            log.info("Forward pass passed.")
 
         except Exception as e:
-            print(f"Forward pass failed: {type(e).__name__}: {e}")
+            log.exception("Forward pass failed: %s: %s", type(e).__name__, e)
             raise
 
         del model

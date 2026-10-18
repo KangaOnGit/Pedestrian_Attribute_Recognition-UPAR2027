@@ -35,6 +35,7 @@ class TrainerGradientDiagnosticsTests(unittest.TestCase):
         trainer.global_step = 0
         trainer.epochs = 1
         trainer.wandb_run = None
+        trainer.aux_weight = 1.0
         return trainer
 
     def test_nonfinite_loss_stops_before_backward_or_optimizer_step(self) -> None:
@@ -149,7 +150,7 @@ class TrainerGradientDiagnosticsTests(unittest.TestCase):
                 ),
             ],
         )
-        trainer.train_epoch = Mock(return_value=1.0)
+        trainer.train_epoch = Mock(return_value=(1.0, 0.0))
 
         with TemporaryDirectory() as output_dir:
             trainer.output_dir = Path(output_dir)

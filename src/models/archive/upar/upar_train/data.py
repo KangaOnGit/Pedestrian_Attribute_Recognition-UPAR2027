@@ -1,5 +1,6 @@
 """Dữ liệu huấn luyện: đọc gt.csv, tìm ảnh, suy ra nguồn dataset (cho GRL), augmentation, Dataset."""
 import glob
+import logging
 import os
 import random
 from pathlib import Path
@@ -12,6 +13,8 @@ from torch.utils.data import Dataset
 
 from ..attributes import NUM_ATTR
 from ..vision import CLIP_MEAN, CLIP_STD
+
+log = logging.getLogger(__name__)
 
 IMG_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 DOMAIN_NAMES = ["Market1501", "PA100k", "PETA"]      # nguồn dataset dùng cho nhánh GRL
@@ -63,7 +66,10 @@ class PathResolver:
         self._index = None
 
     def _build_index(self):
-        print("[data] Đang quét thư mục để lập chỉ mục ảnh theo tên file (chỉ chạy 1 lần)...")
+        log.info(
+            "[data] Đang quét thư mục để lập chỉ mục ảnh theo tên file "
+            "(chỉ chạy 1 lần)..."
+        )
         idx = {}
         for r in self.roots:
             for dp, _, fns in os.walk(r):

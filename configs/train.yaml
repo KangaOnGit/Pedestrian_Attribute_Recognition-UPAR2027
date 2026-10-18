@@ -37,8 +37,8 @@ hyper_param:
   aux_weight: 1.0
 
   # Resize
-  height: 128
-  width: 128
+  height: 256
+  width: 256
 
 data:
   data_path: "data/annotations/train.csv"

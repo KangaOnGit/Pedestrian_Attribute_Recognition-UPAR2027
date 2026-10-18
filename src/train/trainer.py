@@ -18,7 +18,6 @@ from src.utils.hf_hub import push_folder_to_hub
 from src.utils.wb import log_wandb
 from src.metrics.run import run_metrics
 from src.metrics.base import eval_metrics
-from src.models.roi_moe import SparseROIAttributeModel
 
 CONFIG = load_config("configs/train.yaml")
 
@@ -226,14 +225,11 @@ class Trainer:
             
             self.optimizer.zero_grad()
 
-            if isinstance(self.model, SparseROIAttributeModel):
-                logits, aux_loss = self.model(
-                    images_aug,
-                    images_no_aug,
-                    images_detector=images_detector,
-                )
-            else:
-                logits, aux_loss = self.model(images_aug)
+            logits, aux_loss = self._forward_model(
+                images_aug,
+                images_no_aug,
+                images_detector,
+            )
 
             if not torch.isfinite(logits).all():
                 log.error(
@@ -345,7 +341,7 @@ class Trainer:
             self.optimizer.step()
 
             total_loss += loss.item()
-            total_aux += aux_loss
+            total_aux += float(aux_loss.detach().item())
 
             if (batch_idx + 1) % self.logging_steps == 0:
                 log.info(
@@ -366,6 +362,56 @@ class Trainer:
         if not self.train_loader:
             raise ValueError("Training data loader is empty.")
         return total_loss / len(self.train_loader), total_aux/len(self.train_loader)
+
+    def _forward_model(
+        self,
+        images_aug: torch.Tensor,
+        images_no_aug: torch.Tensor,
+        images_detector: torch.Tensor | None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if self._is_sparse_roi_model():
+            output = self.model(
+                images_aug,
+                images_no_aug,
+                images_detector=images_detector,
+            )
+        else:
+            output = self.model(images_aug)
+
+        if isinstance(output, tuple):
+            if len(output) != 2:
+                raise ValueError(
+                    "Model tuple output must contain (logits, auxiliary loss)."
+                )
+            logits, aux_loss = output
+        else:
+            logits = output
+            if not isinstance(logits, torch.Tensor):
+                raise TypeError(
+                    "Model output must be a tensor or a (logits, auxiliary loss) tuple."
+                )
+            aux_loss = logits.new_zeros(())
+
+        if not isinstance(logits, torch.Tensor):
+            raise TypeError("Model logits must be a torch.Tensor.")
+        if not isinstance(aux_loss, torch.Tensor):
+            aux_loss = torch.as_tensor(
+                aux_loss,
+                dtype=logits.dtype,
+                device=logits.device,
+            )
+        return logits, aux_loss
+
+    def _is_sparse_roi_model(self) -> bool:
+        if not any(
+            base.__module__ == "src.models.archived.roi_moe"
+            for base in self.model.__class__.__mro__
+        ):
+            return False
+
+        from src.models.archived.roi_moe import SparseROIAttributeModel
+
+        return isinstance(self.model, SparseROIAttributeModel)
 
     def _nonfinite_gradient_names(self) -> list[str]:
         gradient_tensors = [
@@ -488,17 +534,14 @@ class Trainer:
             images_no_aug: Float[torch.Tensor, "B C H W"] = images_no_aug.to(self.device)
             labels: Float[torch.Tensor, "B K"] = labels.to(self.device)
 
-            if isinstance(self.model, SparseROIAttributeModel):
-                logits, aux_loss = self.model(
-                    images_aug,
-                    images_no_aug,
-                    images_detector=images_detector,
-                )
-            else:
-                logits, aux_loss = self.model(images_aug)
+            logits, aux_loss = self._forward_model(
+                images_aug,
+                images_no_aug,
+                images_detector,
+            )
 
             loss = self.criterion(logits, labels) + aux_loss * self.aux_weight
-            val_loss += loss.item() + aux_loss * self.aux_weight
+            val_loss += loss.item()
             all_predictions.append(logits.sigmoid().cpu())
             all_labels.append(labels.cpu())
 

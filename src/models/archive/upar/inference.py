@@ -1,7 +1,7 @@
 """Predictor dùng trong môi trường chấm bài: không mạng, không gói `clip`, chỉ torch + numpy + Pillow.
 Nạp: weights/clip_visual_fp16.pt (ViT-B/16 vision tower) + weights/head.pt (adapter, τ, text vectors đã tính sẵn, hiệu chuẩn)."""
+import logging
 import os
-import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -13,6 +13,8 @@ from PIL import Image
 from .attributes import ATTR_NAMES, NUM_ATTR
 from .head import PartHead, apply_calibration, sigmoid_np
 from .vision import CLIP_MEAN, CLIP_STD, PatchEncoder
+
+log = logging.getLogger(__name__)
 
 _MEAN = np.asarray(CLIP_MEAN, dtype=np.float32).reshape(3, 1, 1)
 _STD = np.asarray(CLIP_STD, dtype=np.float32).reshape(3, 1, 1)
@@ -49,9 +51,18 @@ class Predictor:
         self.cal_a, self.cal_b, self.cal_off = (cal[k].double().numpy() for k in ("a", "b", "off"))
         self.pool = ThreadPoolExecutor(max_workers=int(num_threads or min(8, os.cpu_count() or 2)))
         self.n_load_errors = 0
-        print("[upar] sẵn sàng | device=%s | fp16=%s | TTA=%s | ảnh %dx%d (lưới %dx%d) | val_hm=%s"
-              % (self.device, self.use_amp, self.tta, self.img_h, self.img_w, grid[0], grid[1], meta.get("val_hm")),
-              file=sys.stderr, flush=True)
+        log.info(
+            "[upar] sẵn sàng | device=%s | fp16=%s | TTA=%s | ảnh %dx%d "
+            "(lưới %dx%d) | val_hm=%s",
+            self.device,
+            self.use_amp,
+            self.tta,
+            self.img_h,
+            self.img_w,
+            grid[0],
+            grid[1],
+            meta.get("val_hm"),
+        )
 
     def _load(self, path):
         try:
@@ -59,7 +70,7 @@ class Predictor:
                 return preprocess(im, self.img_h, self.img_w)
         except Exception as e:                         # ảnh hỏng: dùng ảnh xám để không làm sập cả lượt chạy
             self.n_load_errors += 1
-            print("[upar] CẢNH BÁO không đọc được %s: %r" % (path, e), file=sys.stderr, flush=True)
+            log.warning("[upar] CẢNH BÁO không đọc được %s: %r", path, e)
             return np.zeros((3, self.img_h, self.img_w), dtype=np.float32)
 
     @torch.inference_mode()

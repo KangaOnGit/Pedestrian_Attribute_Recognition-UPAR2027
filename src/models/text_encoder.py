@@ -1,3 +1,4 @@
+import logging
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -10,6 +11,9 @@ from transformers.models.siglip.modeling_siglip import (
 )
 from src.modules.self_attn import ClassSelfAttention
 from src.modules.visual_residual import VisualResidualGate
+
+log = logging.getLogger(__name__)
+
 class TextEncoder(nn.Module):
     """
     SigLIP 2 text encoder with configurable CoOp context.
@@ -68,22 +72,22 @@ class TextEncoder(nn.Module):
         )
         
         if debug:
-            print(f"Embedding Dim: {self.embed_dim}")
-            print(f"Max Length: {self.max_len}")
-            print(f"# Special Tokens: {num_special}")
+            log.debug("Embedding Dim: %s", self.embed_dim)
+            log.debug("Max Length: %s", self.max_len)
+            log.debug("# Special Tokens: %s", num_special)
             
         if debug:
-            print("Tokenizer BOS:", self.tokenizer.bos_token_id)
-            print("Tokenizer EOS:", self.tokenizer.eos_token_id)
-            print("Tokenizer PAD:", self.tokenizer.pad_token_id)
+            log.debug("Tokenizer BOS: %s", self.tokenizer.bos_token_id)
+            log.debug("Tokenizer EOS: %s", self.tokenizer.eos_token_id)
+            log.debug("Tokenizer PAD: %s", self.tokenizer.pad_token_id)
 
-            print("Model BOS:", self.text_encoder.config.bos_token_id)
-            print("Model EOS:", self.text_encoder.config.eos_token_id)
-            print("Model PAD:", self.text_encoder.config.pad_token_id)
+            log.debug("Model BOS: %s", self.text_encoder.config.bos_token_id)
+            log.debug("Model EOS: %s", self.text_encoder.config.eos_token_id)
+            log.debug("Model PAD: %s", self.text_encoder.config.pad_token_id)
 
-            print("Special tokens:", self.tokenizer.special_tokens_map)
-            print("EOS token:", repr(self.tokenizer.eos_token))
-            print("BOS token:", repr(self.tokenizer.bos_token))
+            log.debug("Special tokens: %s", self.tokenizer.special_tokens_map)
+            log.debug("EOS token: %r", self.tokenizer.eos_token)
+            log.debug("BOS token: %r", self.tokenizer.bos_token)
         # for some reason, tokenizer and text encoder has separate token ids
             # son
         self.text_encoder.config.vocab_size = len(self.tokenizer)
@@ -92,9 +96,9 @@ class TextEncoder(nn.Module):
         self.text_encoder.config.pad_token_id = self.tokenizer.pad_token_id
         
         if debug:
-            print(inspect.signature(self.text_encoder.encoder.forward))
-            print(inspect.getsource(self.text_encoder.embeddings.forward))
-            print(inspect.getsource(self.text_encoder.encoder.forward))
+            log.debug("%s", inspect.signature(self.text_encoder.encoder.forward))
+            log.debug("%s", inspect.getsource(self.text_encoder.embeddings.forward))
+            log.debug("%s", inspect.getsource(self.text_encoder.encoder.forward))
 
         self.prompts = prompts
         self.num_classes = len(prompts)
@@ -151,7 +155,7 @@ class TextEncoder(nn.Module):
                 )
             )
             if debug:
-                print(f"category_ctx shape: {self.category_ctx.shape}")
+                log.debug("category_ctx shape: %s", self.category_ctx.shape)
 
             self.class_ctx: Float[torch.Tensor, "40 ctx_len E"] = nn.Parameter(
                 torch.zeros(
@@ -162,7 +166,7 @@ class TextEncoder(nn.Module):
             )
             nn.init.normal_(self.category_ctx, std=0.02)
             if debug:
-                print(f"class_ctx shape: {self.class_ctx.shape}")
+                log.debug("class_ctx shape: %s", self.class_ctx.shape)
 
         elif csc:
             # Independent context per class
@@ -175,7 +179,7 @@ class TextEncoder(nn.Module):
             )
             nn.init.normal_(self.ctx, std=0.02)
             if debug:
-                print(f"ctx shape: {self.ctx.shape}")
+                log.debug("ctx shape: %s", self.ctx.shape)
 
         else:
             # One context shared by every class.
@@ -184,12 +188,12 @@ class TextEncoder(nn.Module):
             )
             nn.init.normal_(self.ctx, std=0.02)
             if debug:
-                print(f"ctx shape: {self.ctx.shape}")
+                log.debug("ctx shape: %s", self.ctx.shape)
             
 
         self.pad_token_id = self.tokenizer.pad_token_id # 0
         if debug:
-            print(f"Pad Token ID: {self.pad_token_id}")
+            log.debug("Pad Token ID: %s", self.pad_token_id)
         if self.pad_token_id is None:
             raise ValueError(
                 "Tokenizer must define a pad_token_id."
@@ -197,7 +201,7 @@ class TextEncoder(nn.Module):
 
         self.eos_token_id = self.tokenizer.eos_token_id # 1
         if debug:
-            print(f"EOS Token ID: {self.eos_token_id}")
+            log.debug("EOS Token ID: %s", self.eos_token_id)
 
         # Tokenize prompts with special tokens.
         tokenized = self.tokenizer(
@@ -252,20 +256,18 @@ class TextEncoder(nn.Module):
             torch.tensor(lengths, dtype=torch.long),
         )
         if debug:
-            print(f"Token IDs Shape: {self.token_ids.shape}")
-            print(f"Token Masks Shape: {self.token_mask.shape}")
-            print(f"Token lengths: {self.token_lengths}")
+            log.debug("Token IDs Shape: %s", self.token_ids.shape)
+            log.debug("Token Masks Shape: %s", self.token_mask.shape)
+            log.debug("Token lengths: %s", self.token_lengths)
             
             encoded = self.tokenizer(
                 "Age-Young",
                 add_special_tokens=True,
             )
-            print("IDs:", encoded["input_ids"])
-            print(
-                "Tokens:",
-                self.tokenizer.convert_ids_to_tokens(
-                    encoded["input_ids"]
-                ),
+            log.debug("IDs: %s", encoded["input_ids"])
+            log.debug(
+                "Tokens: %s",
+                self.tokenizer.convert_ids_to_tokens(encoded["input_ids"]),
             )
             
         if freeze_backbone:
@@ -308,7 +310,7 @@ class TextEncoder(nn.Module):
             embedding_layer.token_embedding(token_ids)
         )
         if self.debug:
-            print(f"phrase_embeds shape: {phrase_embeds.shape}")
+            log.debug("phrase_embeds shape: %s", phrase_embeds.shape)
 
         if self.condition_text:
             B = shallow_features.shape[0]
@@ -438,7 +440,7 @@ class TextEncoder(nn.Module):
             )
 
         if self.debug:
-            print(f"inputs_embeds shape: {inputs_embeds.shape}")
+            log.debug("inputs_embeds shape: %s", inputs_embeds.shape)
 
         position_ids: torch.Tensor = torch.arange(
             self.max_len,
@@ -450,8 +452,8 @@ class TextEncoder(nn.Module):
         )
 
         if self.debug:
-            print(f"position_ids shape: {position_ids.shape}")
-            print(f"position_embeds shape: {position_embeds.shape}")
+            log.debug("position_ids shape: %s", position_ids.shape)
+            log.debug("position_embeds shape: %s", position_embeds.shape)
 
         hidden_states = inputs_embeds + position_embeds
 
@@ -462,7 +464,7 @@ class TextEncoder(nn.Module):
         )
 
         if self.debug:
-            print(f"attention_mask bidirectional shape: {attention_mask.shape}")
+            log.debug("attention_mask bidirectional shape: %s", attention_mask.shape)
 
         eos_positions = torch.tensor(
             eos_positions,
@@ -482,7 +484,7 @@ class TextEncoder(nn.Module):
         )
 
         if self.debug:
-            print(f"hidden_states shape: {hidden_states.shape}")
+            log.debug("hidden_states shape: %s", hidden_states.shape)
 
         if self.condition_text:
             hidden_states = hidden_states.reshape(
@@ -516,16 +518,17 @@ class TextEncoder(nn.Module):
 
         text_features = text_features + self.class_attention(text_features)
         if self.debug:
-            print(f"text_features shape: {text_features.shape}")
+            log.debug("text_features shape: %s", text_features.shape)
 
         out = self.text_encoder.head(text_features)
 
         if self.debug:
-            print(f"out shape: {out.shape}")
+            log.debug("out shape: %s", out.shape)
 
         return out
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.DEBUG)
     from src.utils.config import load_config
     P = load_config("configs/prompts.yaml")
     
@@ -540,7 +543,7 @@ if __name__ == "__main__":
         debug = True,
         condition_text = False,
     )
-    print(inspect.getsource(te.text_encoder.embeddings.forward))
-    print(inspect.getsource(te.text_encoder.forward))
+    log.debug("%s", inspect.getsource(te.text_encoder.embeddings.forward))
+    log.debug("%s", inspect.getsource(te.text_encoder.forward))
     
     text_features = te.forward()
