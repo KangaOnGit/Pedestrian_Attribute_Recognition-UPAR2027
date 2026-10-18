@@ -213,8 +213,8 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument(
         "--loss",
-        choices=("bce", "weighted_bce", "focal", "FocalAsym"),
-        default=HYPER_PARAM["loss"],
+        choices=("bce", "weighted_bce", "focal", "asym", "FocalAsym"),
+        default="asym",
     )
     
     parser.add_argument(
@@ -321,7 +321,14 @@ def parse_args() -> argparse.Namespace:
         help="Weights & Biases run name.",
     )
 
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.loss is None:
+        args.loss = (
+            "asym"
+            if args.architecture == "cca"
+            else HYPER_PARAM["loss"]
+        )
+    return args
 
 def validate_args(args):
     """Validate command-line arguments."""

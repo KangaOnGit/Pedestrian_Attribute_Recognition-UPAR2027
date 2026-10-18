@@ -279,7 +279,7 @@ python scripts/train.py \
   --lr 0.002 \
   --weight-decay 1e-5 \
   --optimizer adamw \
-  --loss focal \
+  --loss asym \
   --output-dir outputs/cca
 ```
 
@@ -348,8 +348,9 @@ changed with `--height` and `--width`.
 
 The default settings are read from [configs/train.yaml](configs/train.yaml)
 and can be overridden on the command line. Current defaults include five
-epochs, batch size 128, learning rate `0.002`, AdamW, focal loss, and `256 x
-256` input images.
+epochs, batch size 128, learning rate `0.002`, AdamW, and `256 x 256` input
+images. CCA-Net uses asymmetric loss by default; other architectures use the
+configured `FocalAsym` loss unless overridden with `--loss`.
 
 Supported losses are:
 
@@ -357,10 +358,11 @@ Supported losses are:
 - `weighted_bce`: binary cross-entropy with configured positive weights
 - `focal`: focal loss with positive/class weights derived from the training
   labels when available
+- `asym`: asymmetric loss (the default for the `cca` architecture)
+- `FocalAsym`: weighted combination of focal and asymmetric losses
 
-When DINOv3 is trainable, its optimizer parameter group uses a learning rate
-one hundredth of the head learning rate. The optimizer options are `adamw` and
-`sgd`.
+Trainable pretrained vision/text backbones use a learning rate one hundredth
+of the head learning rate. The optimizer options are `adamw` and `sgd`.
 
 ## Evaluation and Outputs
 

@@ -50,6 +50,11 @@ losses:
     alpha: 0.2
     gamma: 2
 
+  asym:
+    gamma_neg: 4
+    gamma_pos: 1
+    clip: 0.05
+
   weighted_bce:
     weight:
       - 1
