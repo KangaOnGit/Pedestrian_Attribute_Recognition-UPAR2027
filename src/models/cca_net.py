@@ -30,6 +30,9 @@ class CCA_NET(nn.Module):
         super().__init__()
         
         self.siglip2 = AutoModel.from_pretrained(model_name)
+        if freeze_backbone:
+            for parameter in self.siglip2.parameters():
+                parameter.requires_grad = False
         
         self.text_encoder = TextEncoder(
             model_name = model_name,
