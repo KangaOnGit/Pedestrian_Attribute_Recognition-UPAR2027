@@ -8,8 +8,7 @@ python-dotenv>=1.0.0
 albumentations>=1.4.0
 jaxtyping>=0.2.30
 transformers==5.18.0
-huggingface_hub==2.1.1
-tokenizers==0.23.2
+huggingface_hub>=1.31.0,<3.0
 ultralytics>=8.3.100
 wandb>=0.16.0
 git+https://github.com/openai/CLIP.git
