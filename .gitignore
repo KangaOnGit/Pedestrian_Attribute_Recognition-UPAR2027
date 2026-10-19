@@ -229,6 +229,7 @@ outputs/
 MOCK_README.md
 
 vendor/
+vendor_linux_backup/
 wheels/
 *.safetensors
 vendor_linux/

@@ -5,7 +5,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 VENDOR = ROOT / "vendor_linux"
-sys.path.insert(0, str(VENDOR))
+sys.path.insert(0, str(ROOT))
+if sys.platform.startswith("linux"):
+    sys.path.insert(0, str(VENDOR))
 
 import logging
 from collections.abc import Mapping
@@ -18,7 +20,7 @@ from PIL import Image, ImageFile
 from torch import Tensor, nn
 
 try:
-    from model.roi_moe import SparseROIAttributeModel
+    from models.cca_net import CCA_NET
 except Exception:
     import traceback
     traceback.print_exc()
@@ -29,21 +31,22 @@ except Exception:
 # ---------------------------------------------------------------------
                 
 PROMPTS_PATH = ROOT / "prompts.yaml"
-YOLOE_WEIGHTS_PATH = ROOT / "yoloe-26s-seg.pt"
-DINOV3_MODEL_PATH = ROOT / "dinov3_big_configs"
 WEIGHTS_PATH = ROOT / "best_challenge_avg.pt"
 
-IMAGE_SIZE = (128, 128)  # (height, width)
+IMAGE_SIZE = (256, 256)  # (height, width)
 NUM_CLASSES = 40
 BATCH_SIZE = 32
+CTX_LEN = 16
+SHALLOW_HIDDEN_DIM = 128
+CONDITION_TEXT = False
 
 MEAN = torch.tensor(
-    [0.485, 0.456, 0.406],
+    [0.5, 0.5, 0.5],
     dtype=torch.float32,
 ).view(1, 3, 1, 1)
 
 STD = torch.tensor(
-    [0.229, 0.224, 0.225],
+    [0.5, 0.5, 0.5],
     dtype=torch.float32,
 ).view(1, 3, 1, 1)
 
@@ -52,7 +55,7 @@ DEVICE = torch.device(
 )
 
 MODEL: nn.Module | None = None
-PROMPTS: Any = None
+PROMPTS: list[str] | None = None
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -122,43 +125,21 @@ def load_model_weights(
             "Invalid checkpoint state dictionary."
         )
 
-    # Remove the DistributedDataParallel prefix if present.
+    if not all(
+        isinstance(key, str) and isinstance(value, Tensor)
+        for key, value in state_dict.items()
+    ):
+        raise ValueError("Checkpoint contains an invalid state dictionary.")
+
     if state_dict and all(
-        isinstance(key, str) and key.startswith("module.")
-        for key in state_dict
+        key.startswith("module.") for key in state_dict
     ):
         state_dict = {
             key.removeprefix("module."): value
             for key, value in state_dict.items()
         }
 
-    # Strict loading catches architecture/checkpoint mismatches.
-    #model.load_state_dict(state_dict, strict=True)
-    
-
-    # Match transformer-layer names from the training checkpoint
-    # to the current Hugging Face DINOv3 module structure.
-    model_keys = set(model.state_dict().keys())
-    compatible_state_dict = {}
-
-    for key, value in state_dict.items():
-        new_key = key
-
-        old_prefix = "image_backbone.model.layer."
-        new_prefix = "image_backbone.model.model.layer."
-
-        if key.startswith(old_prefix):
-            candidate = new_prefix + key[len(old_prefix):]
-            if candidate in model_keys:
-                new_key = candidate
-
-        if new_key in compatible_state_dict:
-            raise ValueError(f"Duplicate checkpoint key after mapping: {new_key}")
-
-        compatible_state_dict[new_key] = value
-
-    # Fail if any trained parameter is missing or unexpected.
-    model.load_state_dict(compatible_state_dict, strict=True)
+    model.load_state_dict(state_dict, strict=True)
 
 # ---------------------------------------------------------------------
 # Model initialization
@@ -172,27 +153,45 @@ def load_model() -> None:
     if MODEL is not None:
         return
 
-    config = load_config(PROMPTS_PATH)
-
-    if "prompts" not in config:
-        raise KeyError(
-            f"'prompts' is missing from {PROMPTS_PATH}"
+    if not WEIGHTS_PATH.is_file():
+        raise FileNotFoundError(
+            f"Trained CCA checkpoint not found: {WEIGHTS_PATH}"
         )
 
-    PROMPTS = config["prompts"]
+    config = load_config(PROMPTS_PATH)
+    prompts = config.get("prompts")
+    category_ids = config.get("category_ids")
+    if not isinstance(prompts, list) or not all(
+        isinstance(prompt, str) for prompt in prompts
+    ):
+        raise ValueError(f"Expected a list of prompt strings in {PROMPTS_PATH}")
+    if len(prompts) != NUM_CLASSES:
+        raise ValueError(
+            f"Expected {NUM_CLASSES} prompts in {PROMPTS_PATH}, got {len(prompts)}"
+        )
+    if not isinstance(category_ids, list) or not all(
+        isinstance(category_id, int) for category_id in category_ids
+    ):
+        raise ValueError(
+            f"Expected a list of category IDs in {PROMPTS_PATH}"
+        )
+    if len(category_ids) != NUM_CLASSES:
+        raise ValueError(
+            f"Expected {NUM_CLASSES} category IDs in {PROMPTS_PATH}, "
+            f"got {len(category_ids)}"
+        )
 
-    model = SparseROIAttributeModel(
-        num_classes=NUM_CLASSES,
-        hidden_dim=128,
-        num_experts=5,
-        roi_top_k=2,
-        prompts=PROMPTS,
-        roi_generator="yoloe",
-        yoloe_prompt_mode="one-pass",
-        image_backbone_type="dinov3",
-        dinov3_trainable=False,
-        yoloe_model_id=str(YOLOE_WEIGHTS_PATH),
-        dinov3_model_id=str(DINOV3_MODEL_PATH),
+    PROMPTS = prompts
+
+    model = CCA_NET(
+        prompts=prompts,
+        ctx_len=CTX_LEN,
+        csc=False,
+        hybrid=True,
+        category_ids=category_ids,
+        condition_text=CONDITION_TEXT,
+        freeze_backbone=True,
+        shallow_hidden_dim=SHALLOW_HIDDEN_DIM,
     )
 
     load_model_weights(
@@ -214,13 +213,8 @@ def load_model() -> None:
 
 def load_image(
     image_path: str | Path,
-) -> tuple[Tensor, Tensor, Tensor]:
-    """
-    Returns:
-        images_aug:     [3, H, W], normalized RGB.
-        images_no_aug:  [3, H, W], normalized RGB.
-        images_detector:[3, H, W], RGB in [0, 1].
-    """
+) -> Tensor:
+    """Load and normalize an RGB image for CCA-Net."""
     height, width = IMAGE_SIZE
     image_path = Path(image_path)
 
@@ -241,21 +235,10 @@ def load_image(
         .div_(255.0)
     )
 
-    # Detector input: unnormalized RGB in [0, 1].
-    images_detector = image_tensor.contiguous()
-
-    # Backbone inputs: ImageNet-normalized RGB.
-    images_no_aug = (
+    return (
         (image_tensor - MEAN.squeeze(0))
         / STD.squeeze(0)
     ).contiguous()
-
-    # No stochastic augmentation during inference.
-    # This is the deterministic counterpart of the normalized
-    # training augmentation branch.
-    images_aug = images_no_aug.clone()
-
-    return images_aug, images_no_aug, images_detector
 
 # ---------------------------------------------------------------------
 # Forward pass
@@ -263,26 +246,16 @@ def load_image(
 
 @torch.inference_mode()
 def forward_batch(
-    images_aug: Tensor,
-    images_no_aug: Tensor,
-    images_detector: Tensor,
+    images: Tensor,
 ) -> Tensor:
     if MODEL is None:
         raise RuntimeError(
             "Model is not initialized. Call load_model() first."
         )
 
-    images_aug = images_aug.to(DEVICE)
-    images_no_aug = images_no_aug.to(DEVICE)
-    images_detector = images_detector.to(DEVICE)
-
-    output = MODEL(
-        images_aug,
-        images_no_aug,
-        images_detector=images_detector,
-    )
-
-    logits = output[0] if isinstance(output, (tuple, list)) else output
+    logits = MODEL(images.to(DEVICE))
+    if isinstance(logits, (tuple, list)):
+        logits = logits[0]
 
     if not isinstance(logits, Tensor):
         raise TypeError("Model output must contain a logits tensor.")
@@ -313,31 +286,15 @@ def predict_batch(
     for start in range(0, len(samples), BATCH_SIZE):
         batch_samples = samples[start : start + BATCH_SIZE]
 
-        image_pairs = [
-            load_image(sample["image_path"])
-            for sample in batch_samples
-        ]
-
-        images_aug = torch.stack(
-            [pair[0] for pair in image_pairs],
+        images = torch.stack(
+            [
+                load_image(sample["image_path"])
+                for sample in batch_samples
+            ],
             dim=0,
         )
 
-        images_no_aug = torch.stack(
-            [pair[1] for pair in image_pairs],
-            dim=0,
-        )
-
-        images_detector = torch.stack(
-            [pair[2] for pair in image_pairs],
-            dim=0,
-        )
-
-        logits = forward_batch(
-            images_aug,
-            images_no_aug,
-            images_detector,
-        )
+        logits = forward_batch(images)
 
         probabilities = torch.sigmoid(logits).cpu()
 
@@ -388,7 +345,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Smoke-test SparseROIAttributeModel inference."
+        description="Smoke-test CCA-Net inference."
     )
     parser.add_argument(
         "--image",
