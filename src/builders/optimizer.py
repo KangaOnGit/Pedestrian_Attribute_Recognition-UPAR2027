@@ -45,7 +45,7 @@ def build_optimizer(
     parameter_groups = [{"params": head_parameters, "lr": lr}]
     if backbone_parameters:
         parameter_groups.append(
-            {"params": backbone_parameters, "lr": lr * 0.01}
+            {"params": backbone_parameters, "lr": lr * 0.1}
         )
 
     if optim_name == "adamw":
