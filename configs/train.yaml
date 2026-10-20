@@ -2,7 +2,7 @@ default:
   seed: 42
 
 hyper_param:
-  lr: 1.e-5
+  lr: 1.e-4
   epochs: 5
 
   weight_decay: 1.e-5
@@ -37,8 +37,8 @@ hyper_param:
   aux_weight: 1.0
 
   # Resize
-  height: 256
-  width: 256
+  height: 224
+  width: 224
 
 data:
   data_path: "data/annotations/train.csv"

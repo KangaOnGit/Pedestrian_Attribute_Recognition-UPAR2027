@@ -136,7 +136,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--cca-model-name",
-        default="google/siglip2-large-patch16-256",
+        default="google/siglip2-base-patch16-224",
         help="Hugging Face SigLIP2 model used by CCA-Net.",
     )
     parser.add_argument(
