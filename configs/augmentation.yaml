@@ -57,8 +57,8 @@ eval:
 
   random_resized_crop:
     p: 1.0
-    scale: [0.6, 1.0]
-    ratio: [0.85, 1.15]
+    scale: [0.8, 1.0]
+    ratio: [0.9, 1.10]
 
   affine:
     scale: [0.9, 1.1]

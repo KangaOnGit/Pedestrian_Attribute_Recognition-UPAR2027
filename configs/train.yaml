@@ -2,31 +2,31 @@ default:
   seed: 42
 
 hyper_param:
-  lr: 0.002
+  lr: 1.e-5
   epochs: 5
 
   weight_decay: 1.e-5
 
-  logging_steps: 10
+  logging_steps: 750
   warmup_steps: 10
   gradient_steps: 8
 
   batch_size: 128
 
-  loss: "FocalAsym"
+  loss: "asym"
   optim: "adamw"
   workers: 0
   output_dir: "outputs/train"
   hub_name: "upar2026-track1-model"
 
   # Augmentation
-  aug: False
+  aug: True
   median: True
   horizontal_flip: True
-  random_resized_crop: False
+  random_resized_crop: True
   affine: True
   safe_rotate: False
-  coarse_dropout: False
+  coarse_dropout: True
   gaussian_blur: True
   color_jitter: True
   rgb_shift: False
