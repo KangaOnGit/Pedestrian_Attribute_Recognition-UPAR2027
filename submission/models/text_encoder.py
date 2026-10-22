@@ -5,7 +5,8 @@ import torch.nn.functional as F
 from pathlib import Path
 
 from transformers import AutoTokenizer, AutoModel
-from transformers.masking_utils import create_bidirectional_mask
+#from transformers.masking_utils import create_bidirectional_mask
+from transformers.modeling_attn_mask_utils import _prepare_4d_attention_mask
 from modules.self_attn import ClassSelfAttention
 from modules.visual_residual import VisualResidualGate
 from models.pretrained import PRETRAINED_MODEL_PATH
@@ -62,8 +63,8 @@ class TextEncoder(nn.Module):
         )
         
         self.text_encoder = text_encoder
-        self.embed_dim = self.text_encoder.get_input_embeddings().embedding_dim
-        self.max_len = self.text_encoder.config.max_position_embeddings
+        self.embed_dim = 768
+        self.max_len = 64
         num_special = self.tokenizer.num_special_tokens_to_add(pair=False)
         
         self.class_attention = ClassSelfAttention(
@@ -458,11 +459,15 @@ class TextEncoder(nn.Module):
 
         hidden_states = inputs_embeds + position_embeds
 
-        attention_mask = create_bidirectional_mask(
-            config=self.text_encoder.config,
-            inputs_embeds=hidden_states,
-            attention_mask=attention_mask,
+        attention_mask = _prepare_4d_attention_mask(
+            attention_mask.to(dtype=torch.long),
+            dtype=hidden_states.dtype,
         )
+        #attention_mask = create_bidirectional_mask(
+            #config=self.text_encoder.config,
+            #inputs_embeds=hidden_states,
+            #attention_mask=attention_mask,
+        #)
 
         if self.debug:
             log.debug("attention_mask bidirectional shape: %s", attention_mask.shape)

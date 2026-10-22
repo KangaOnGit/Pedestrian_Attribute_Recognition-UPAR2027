@@ -33,7 +33,7 @@ except Exception:
 PROMPTS_PATH = ROOT / "prompts.yaml"
 WEIGHTS_PATH = ROOT / "best_challenge_avg.pt"
 
-IMAGE_SIZE = (256, 256)  # (height, width)
+IMAGE_SIZE = (224, 224)  # (height, width)
 NUM_CLASSES = 40
 BATCH_SIZE = 32
 CTX_LEN = 16

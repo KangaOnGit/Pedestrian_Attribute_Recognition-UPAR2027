@@ -3,8 +3,28 @@
 A PyTorch project for multi-label pedestrian attribute recognition (PAR). Given
 an image of a person, the model predicts multiple visual attributes, such as
 age-related appearance, clothing, and accessories. The project supports
-Market1501, PA100k, and PETA annotations, with a DINOv3-based image model and
-an optional prompted region-of-interest (ROI) mixture-of-experts model.
+Market1501, PA100k, and PETA annotations. Its newest architecture, CCA_Net
+(Cross-Channel-Attention Network), uses SigLIP2 and self-attention over
+attribute text features to model relationships between labels. The earlier
+DINOv3 image and ROI mixture-of-experts models remain available.
+
+## UPAR2027 Challenge
+
+This repository documents the author's approach to the UPAR2027 Challenge at
+WACV 2027. The submitted ROI-MoE model using YOLO-E achieved a 64.4% Challenge
+Average on the hidden test set. CCA_Net was developed later but could not be
+submitted for the hidden-test evaluation because Codabench was inaccessible
+before the submission deadline. Its reported results in this repository are
+therefore public-test-set results, not hidden-test results.
+
+| Architecture | Proposal generator | Evaluation split | Challenge Average | Submission status |
+|--------------|--------------------|------------------|------------------:|-------------------|
+| ROI-MoE | YOLO-E | Hidden test | 64.4% | Submitted |
+| CCA_Net | None | Public test | 84.5111% | Not submitted |
+
+These scores are not a like-for-like comparison. CCA_Net's public-test result
+does not establish an improvement over the submitted ROI-MoE model because
+CCA_Net was not evaluated on the same hidden test set.
 
 ## Overview
 
@@ -40,9 +60,10 @@ The project focuses on three challenges in pedestrian attribute recognition:
 
 ## Approach
 
-The model designs use complementary global, local, and label-aware
-representations. The ROI-MoE design is specifically motivated by challenges 2
-and 3:
+The architectures address different limitations. ROI-MoE focuses on
+representing local visual evidence alongside whole-image context. CCA_Net
+focuses on label relationships and pretrained vision-language
+representations. Neither is claimed to solve dataset domain shift:
 
 - **Consistent image preparation:** images are resized to the configured input
   dimensions and normalized with ImageNet statistics. This gives the model a
@@ -70,9 +91,14 @@ and 3:
   averaged ROI-expert features before predicting the attribute vector.
 - **Imbalance-aware training:** focal loss can derive per-attribute positive
   and class weights from the selected training labels.
+- **Label self-attention:** CCA_Net uses SigLIP2 image and text encoders,
+  learned shared and category/class-specific text contexts, and multi-head
+  self-attention across class text features to model label relationships.
+  SigLIP2 pretraining may provide useful representations for imbalanced
+  labels, but cannot guarantee coverage of every target class or dataset.
 
 These components provide modeling strategies for the identified challenges;
-they do not constitute a formal domain-adaptation algorithm.
+the project does not implement a formal domain-adaptation algorithm.
 
 ## Model Architectures
 
@@ -86,16 +112,28 @@ Use `--backbone conv` for a convolutional encoder trained from scratch. Use
 `--finetune-backbone` to fine-tune DINOv3; otherwise, its pretrained model
 weights are frozen.
 
-### CCA-Net with SigLIP2
+### CCA_Net (Cross-Channel-Attention Network)
 
-The `cca` architecture trains `CCA_NET` with the attribute prompts and category
-IDs in `configs/prompts.yaml`. It passes the augmented tensor directly to the
-SigLIP2 vision encoder (without an image processor); the training data pipeline
-resizes and normalizes RGB pixels to the SigLIP2 range. The default text
-parameterization is hybrid category/class context with 16 learned tokens, and
-the pretrained text and vision backbones remain frozen unless
-`--finetune-backbone` is supplied. Use `--condition-text` to condition learned
-text context on shallow visual features.
+CCA_Net (`--architecture cca`) uses the SigLIP2 text and vision encoders with
+attribute prompts and category IDs from `configs/prompts.yaml`. Its hybrid
+context combines learned shared context (CoOp-style) with category-specific
+and class-specific context (CSC), allowing labels in a category to share
+context while retaining label-specific information. It extracts each class
+prompt's end-of-sequence feature and applies 16-head self-attention to the
+sequence of class features. In this attention, sequence positions are
+attributes/classes; each position's feature channels form its embedding, split
+across attention heads. The attention weights therefore relate each class to
+every other class, rather than attending over image regions or channels.
+Although the architecture name expands to “Cross-Channel-Attention Network,”
+the implemented operation is self-attention across the class dimension.
+
+The default text parameterization uses 16 learned context tokens. The
+pretrained text and vision backbones stay frozen unless
+`--finetune-backbone` is supplied. `--condition-text` optionally conditions
+the learned text context on shallow visual features (a pseudo-CoCoOp-style
+option). SigLIP2's broad pretraining may provide useful prior representations
+when target labels are imbalanced, but this is a motivation rather than a
+guarantee that it has seen the target data.
 
 ### Prompted ROI mixture of experts
 
@@ -116,6 +154,14 @@ features.
 The patch grid and detector boxes must refer to the same unaugmented image
 coordinates; the ROI model uses the normalized, non-augmented image view for
 both DINOv3 and patch pooling.
+
+ROI-MoE remains available. In the author's experiments, the YOLO-E ROI
+generator could not be trained reliably, and proposal errors could propagate
+through the ROI processing pipeline, contributing to poor model performance.
+CCA_Net avoids generated ROI proposals and is the current recommended
+architecture for new experiments. The hidden-test and public-test scores above
+use different splits and should not be treated as a direct architecture
+comparison.
 
 YOLO-E and SAM 3 are optional proposal generators. In `loop` mode, YOLO-E
 returns the highest-confidence pixel-coordinate `(x1, y1, x2, y2)` box per
@@ -156,20 +202,13 @@ YOLO-E receives the pixel range it expects without changing the normalized
 images used by the model. It is not required when automatic proposals are
 disabled or when `roi_boxes` are passed directly.
 
-YOLO-E supports two prompt modes. The default `loop` mode runs detection once
-per prompt and retains that prompt's highest-confidence box in each image.
-Set `yoloe_prompt_mode="one-pass"` (or pass `--yoloe-prompt-mode one-pass` to
-training) to set all prompts together and run one detection pass over the
-batch. One-pass mode retains all returned boxes; the result is padded across
-images to the largest detection count in that batch. This can reduce
-proposal-generation time; results can differ from running each prompt
-separately.
-
-YOLO-E defaults to `yoloe-11s-seg.pt`. Its weights and text encoder are
-downloaded on first use. SAM 3 loads the Hugging Face `facebook/sam3` model and
-processor at construction time; access may require accepting the model terms
-and authenticating with Hugging Face. SAM 3 runs once per image and prompt,
-which can increase proposal-generation time.
+YOLO-E's default `loop` prompt mode runs detection per prompt and keeps the
+highest-confidence box for each prompt/image. `one-pass` sends all prompts
+together, retains all detections, and pads them to the batch maximum; this may
+be faster but can produce different boxes. Choose with
+`--yoloe-prompt-mode`. YOLO-E uses `yoloe-11s-seg.pt` by default. SAM 3 loads
+`facebook/sam3` from Hugging Face and may require accepting model terms and
+authenticating; it runs once per image and prompt.
 
 ## Data
 
@@ -215,6 +254,43 @@ pip install -r requirements.txt
 Pretrained DINOv3, YOLO-E, and SAM 3 weights may require network access on
 first use. YOLO-E and SAM 3 are only needed for ROI training with those
 generators.
+
+### Docker
+
+The training image installs the project dependencies and runs
+[`scripts/train.py`](scripts/train.py) when started. Build it from the
+repository root:
+
+```bash
+docker build -f docker/Dockerfile.train -t upar2027-train .
+```
+
+Run CCA-Net training with the repository's data and output directories mounted
+from the host:
+
+```bash
+docker run --rm --gpus all \
+  -v "${PWD}/data:/app/data" \
+  -v "${PWD}/outputs:/app/outputs" \
+  upar2027-train \
+  --train-csv data/annotations/train.csv \
+  --val-csv data/annotations/val.csv \
+  --architecture cca \
+  --all-training-data \
+  --eval-num-samples 3000 \
+  --context-mode hybrid \
+  --epochs 15 \
+  --batch-size 64 \
+  --lr 1e-4 \
+  --output-dir outputs/cca
+```
+
+The `--gpus all` option requires Docker configured for NVIDIA GPU access; omit
+it for CPU training (which will be slower). Persisting `/root/.cache/huggingface`
+as a mounted volume is optional and avoids downloading pretrained files again
+between container runs. For example, add
+`-v "${PWD}/.cache/huggingface:/root/.cache/huggingface"` to the `docker run`
+command.
 
 ### Optional credentials
 
@@ -275,13 +351,50 @@ python scripts/train.py \
   --architecture cca \
   --cca-model-name google/siglip2-large-patch16-256 \
   --batch-size 128 \
-  --epochs 5 \
-  --lr 0.002 \
+  --epochs 15 \
+  --lr 1e-4 \
   --weight-decay 1e-5 \
   --optimizer adamw \
   --loss asym \
   --output-dir outputs/cca
 ```
+
+#### CCA_Net training notebooks
+
+The staged CCA_Net experiments are documented in the notebooks below. The
+suffix indicates the five-epoch segment covered by that notebook; later
+segments load checkpoints produced by earlier runs, and training settings
+(including batch size, learning rate, and backbone fine-tuning) vary between
+segments.
+
+| Epoch segment | Notebook |
+|---------------|----------|
+| 0–5 | [CCA_Net_0_5.ipynb](notebooks/CCA_Net_0_5.ipynb) |
+| 5–10 | [CCA_Net_5_10.ipynb](notebooks/CCA_Net_5_10.ipynb) |
+| 10–15 | [CCA_Net_10_15.ipynb](notebooks/CCA_Net_10_15.ipynb) |
+| 15–20 | [CCA_Net_15_20.ipynb](notebooks/CCA_Net_15_20.ipynb) |
+| 20–25 | [CCA_Net_20_25.ipynb](notebooks/CCA_Net_20_25.ipynb) |
+
+#### Reported CCA-Net results
+
+CCA_Net typically converges in about 10-15 epochs in the reported experiments.
+The table shows the highest Challenge Average among the displayed public-test
+results. Metrics are from the same checkpoint; the displayed results cover
+multiple training iterations. The available notes do not identify whether this
+score came from local evaluation against a public split or a public leaderboard,
+or identify which notebook run produced the displayed checkpoint. The
+notebooks document staged checkpoint handoffs, but do not record the random
+seed or number of independent runs. The repository's current default seed is
+42, and its training loop saves the best validation Challenge Average, but
+neither fact establishes the provenance of the reported result. The CCA_Net
+example command above uses
+`google/siglip2-large-patch16-256`; the training script's default is
+`google/siglip2-base-patch16-224`. The exact model ID and full configuration
+used for this reported score are not documented.
+
+| Best checkpoint | Challenge avg | mA | Label F1 | Inst. acc. | Inst. prec. | Inst. rec. | Inst. F1 |
+|-----------------|--------------:|---:|---------:|-----------:|------------:|-----------:|---------:|
+| Highest Challenge avg | 84.5111% | 84.3970% | 63.5776% | 74.7340% | 77.7212% | 94.2260% | 84.6256% |
 
 Train the UPAR model with its dedicated training script:
 
@@ -348,7 +461,7 @@ changed with `--height` and `--width`.
 
 The default settings are read from [configs/train.yaml](configs/train.yaml)
 and can be overridden on the command line. Current defaults include five
-epochs, batch size 128, learning rate `0.002`, AdamW, and `256 x 256` input
+epochs, batch size 128, learning rate `1e-4`, AdamW, and `224 x 224` input
 images. CCA-Net uses asymmetric loss by default; other architectures use the
 configured `FocalAsym` loss unless overridden with `--loss`.
 
@@ -367,7 +480,8 @@ of the head learning rate. The optimizer options are `adamw` and `sgd`.
 ## Evaluation and Outputs
 
 Validation converts logits to probabilities with sigmoid and uses a default
-threshold of `0.5`. Reported metrics include:
+threshold of `0.5`. In this repository, Challenge Average is the harmonic mean
+of label mean accuracy (`mA`) and instance F1. Reported metrics include:
 
 - Challenge average
 - Label mean accuracy (`mA`)
@@ -394,11 +508,12 @@ Average.
 .
 ├── configs/       # Training, augmentation, evaluation, prompt, and logging configuration
 ├── data/          # Annotation CSVs and pedestrian image datasets
+├── docker/        # Training container definition
 ├── scripts/       # Training entry point
 ├── src/
 │   ├── builders/  # Data-loader, loss, and optimizer builders
 │   ├── metrics/   # Label-, instance-, and challenge-level evaluation
-│   ├── models/    # Image and ROI mixture-of-experts architectures
+│   ├── models/    # CCA-Net, image, and ROI mixture-of-experts architectures
 │   ├── train/     # Dataset transforms, training loop, and checkpoints
 │   └── utils/     # Configuration, logging, and integration helpers
 ├── tests/         # Regression and unit tests

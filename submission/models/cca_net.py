@@ -51,12 +51,12 @@ class CCA_NET(nn.Module):
             condition_text = condition_text,
             debug = debug,
         )
-        
+                
         self.vision_encoder = VisionEncoder(
             vision_encoder = self.siglip2.vision_model,
             freeze_backbone = freeze_backbone,
             shallow_hidden_dim = shallow_hidden_dim,
-            shallow_out_dim = self.siglip2.text_model.get_input_embeddings().embedding_dim,
+            shallow_out_dim = 768,
             debug = debug,
         )
         self.con_text = condition_text

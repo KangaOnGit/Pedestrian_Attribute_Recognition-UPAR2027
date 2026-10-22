@@ -49,7 +49,8 @@ class VisionEncoder(nn.Module):
     ) -> dict[str, torch.Tensor]:
 
         # shallow path
-        shallow_features: torch.Tensor = self.shallow_cnn(images)
+        #shallow_features: torch.Tensor = self.shallow_cnn(images)
+        shallow_features: torch.Tensor = 1
         if self.debug:
             log.debug("shallow_features shape: %s", shallow_features.shape)
 
