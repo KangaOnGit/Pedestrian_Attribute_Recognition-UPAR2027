@@ -11,20 +11,23 @@ DINOv3 image and ROI mixture-of-experts models remain available.
 ## UPAR2027 Challenge
 
 This repository documents the author's approach to the UPAR2027 Challenge at
-WACV 2027. The submitted ROI-MoE model using YOLO-E achieved a 64.4% Challenge
-Average on the hidden test set. CCA_Net was developed later but could not be
-submitted for the hidden-test evaluation because Codabench was inaccessible
-before the submission deadline. Its reported results in this repository are
-therefore public-test-set results, not hidden-test results.
+WACV 2027. The submitted ROI-MoE model using YOLO-E achieved a 64.4% Challenge Average on the hidden test set. CCA_Net was developed after the original submission deadline and later received a Codabench leaderboard evaluation. Its local public-test result and hidden-test Codabench result are reported separately below.
 
 | Architecture | Proposal generator | Evaluation split | Challenge Average | Submission status |
 |--------------|--------------------|------------------|------------------:|-------------------|
-| ROI-MoE | YOLO-E | Hidden test | 64.4% | Submitted |
-| CCA_Net | None | Public test | 84.5111% | Not submitted |
+| ROI-MoE | YOLO-E | Hidden test (Codabench) | 64.4% | Submitted |
+| CCA_Net | None | Local public test | 84.5111% | Evaluated locally |
+| CCA_Net | None | Hidden test (Codabench) | 75.01% | Rank 66 |
 
-These scores are not a like-for-like comparison. CCA_Net's public-test result
-does not establish an improvement over the submitted ROI-MoE model because
-CCA_Net was not evaluated on the same hidden test set.
+The Codabench listing for CCA_Net (submission ID `1010859`, group
+`1010859_VID-Docker-GPU`, dated 2026-10-26 16:41) reports:
+
+| Avg | mA | Label_F1 | Inst_Acc | Inst_Prec | Inst_Rec | Inst_F1 |
+|----:|---:|---------:|---------:|----------:|---------:|--------:|
+| 0.7501 | 0.753 | 0.5154 | 0.62 | 0.6815 | 0.8486 | 0.7471 |
+
+The local public-test score is from a different split and should not be
+compared directly with the hidden-test results.
 
 ## Overview
 
